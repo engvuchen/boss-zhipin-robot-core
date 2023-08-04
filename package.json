@@ -1,0 +1,20 @@
+{
+  "name": "boss-zhipin-robot-core",
+  "version": "1.0.0",
+  "description": "",
+  "dependencies": {
+    "nodemailer": "^6.9.4",
+    "nodemailer-smtp-transport": "^2.7.4",
+    "nodemailer-wellknown": "^0.2.3",
+    "puppeteer": "^20.8.3",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  },
+  "main": "index.js",
+  "scripts": {
+    "main": "node index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
