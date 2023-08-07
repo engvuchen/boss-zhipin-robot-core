@@ -21,7 +21,7 @@ puppeteer.use(stealthPlugin());
 
 let browser;
 let marketPage;
-let targetNum = 2; // 30个需大概4m30s
+let targetNum; // 30个需大概4m30s
 let hasPost = [];
 // let hasScreenShot = false;
 let logs = [];
@@ -96,18 +96,19 @@ async function start(
   ({ targetNum, queryParams, wt2Cookie, excludeCompanies = [], excludeJobs = [], helloTxt } = conf);
   cookies[0].value = wt2Cookie;
 
-  let originHasPostContent = await fs.readFile(`${process.cmd()}/hahPostCompany.txt`, 'utf-8');
+  let originHasPostContent = await fs.readFile(`${process.cwd()}/hahPostCompany.txt`, 'utf-8');
 
   try {
-    log(`自动打招呼进行中, 本次目标: ${targetNum}; 请耐心等待`);
+    myLog(`自动打招呼进行中, 本次目标: ${targetNum}; 请耐心等待`);
 
+    // await sleep(1000);
     await main(queryParams.page);
 
-    log('✨任务顺利完成！');
+    myLog('✨任务顺利完成！');
   } catch (error) {
-    log('🚀 ~ file: index.js:51 ~ error:', error);
+    myLog('🚀 ~ file: index.js:51 ~ error:', error);
     // if (marketPage?.screenshot) {
-    //   log('监测到任务执行失败，开始截图');
+    //   myLog('监测到任务执行失败，开始截图');
     //   await marketPage?.screenshot({
     //     path: 'mail-error.png',
     //     // fullPage: true,
@@ -119,28 +120,31 @@ async function start(
     //     },
     //   });
     //   // await sendMail('mail-error.png', 'Node.js截图-任务失败');
-    //   log('✨截图成功');
+    //   myLog('✨截图成功');
     // }
   }
   if (hasPost.length) {
     let hasPostCompanyStr = [originHasPostContent, '-------', hasPost.join('\n')].join('\n');
-    await fs.writeFile(`${process.cmd()}/hahPostCompany.txt`, hasPostCompanyStr);
+    await fs.writeFile(`${process.cwd()}/hahPostCompany.txt`, hasPostCompanyStr);
   }
   // await autoCommit(); // 可能有异常，提交截图
-  process.exit();
+  // process.exit();
 }
 async function main(pageNum = 1) {
-  console.log('页数:', pageNum, '; 剩余目标:', targetNum);
+  myLog('页数:', pageNum, '; 剩余目标:', targetNum);
 
   if (!marketPage) await initBrowserAndSetCookie();
   let marketUrl = getNewMarketUrl(pageNum); // 出现验证页，说明 puppeteer 被检测了(403)
-  console.log('marketUrl', marketUrl);
+  myLog('岗位市场链接', marketUrl);
 
   await marketPage.goto(marketUrl, {
     waitUntil: 'networkidle2', // 与 waitForTimeout 冲突貌似只能存在一个
     // timeout: 60000,
   });
   marketPage.waitForNavigation();
+
+  // 关闭安全问题弹窗
+  await marketPage.click('.dialog-account-safe > div.dialog-container > div.dialog-title > a').catch(e => e);
 
   await autoSayHello(marketPage);
 
@@ -153,6 +157,7 @@ async function main(pageNum = 1) {
 async function initBrowserAndSetCookie() {
   browser = await puppeteer.launch({
     headless: 'new', // 是否以浏览器视图调试
+    // headless: false,
     // slowMo: 500, // 逻辑执行速度
     devtools: false,
     defaultViewport: null, // null 则页面和窗口大小一致
@@ -165,7 +170,7 @@ async function autoSayHello(marketPage) {
   // let cards = await marketPage.$$('li.job-card-wrapper'); // 卡片选择器
   // h3 > a，h3.innerText 可以拿到
   let jobCards = Array.from(await marketPage.$$('li.job-card-wrapper'));
-  log('🚀 ~ file: index.js:122 ~ autoSayHello ~ jobCards:', jobCards?.length);
+  // myLog('🚀 ~ file: index.js:122 ~ autoSayHello ~ jobCards:', jobCards?.length);
 
   let notPostJobs = await asyncFilter(jobCards, async node => {
     let jobName = await node.$eval('.job-name', node => node.innerText);
@@ -180,17 +185,17 @@ async function autoSayHello(marketPage) {
       return true;
     }
   });
-  log('🚀 ~ file: index.js:132 ~ notPostJobs ~ notPostJobs:', notPostJobs?.length);
+  myLog('未投递岗位：', notPostJobs?.length);
 
   // if (hasScreenShot === false && jobCards?.length === 0) {
   //   // 用于 Github Action 测试
-  //   console.log('监测到岗位列表为空，开始截图');
+  //   myLog('监测到岗位列表为空，开始截图');
   //   await marketPage.screenshot({
   //     path: './mail.png',
   //     fullPage: true,
   //   });
   //   // await sendMail();
-  //   console.log('✨截图成功');
+  //   myLog('✨截图成功');
   //   hasScreenShot = true;
   // }
 
@@ -200,6 +205,7 @@ async function autoSayHello(marketPage) {
     await sendHello(node, marketPage);
   }
 }
+// sendHello 至少有 3s 等待
 async function sendHello(node, marketPage) {
   await marketPage.evaluate(node => node.click(), node); // 点击公司卡片的右侧区域，打开公司详情页
   await sleep(1000); // 等待资源加载
@@ -213,14 +219,14 @@ async function sendHello(node, marketPage) {
     return await detailPage.close();
   }
   communityBtn.click(); // 点击后，详情页被替换为沟通列表页
-  await sleep(1500);
+  await sleep(1000);
 
   // textarea 输入必须用以下方式触发，解除“发送”按钮禁用
   // 1. 找到打招呼输入框，输入内容，并触发 input 事件
   // todo 可能出现“安全问题”验证，导致选择器失效
   await detailPage.$eval(
     // 'div.edit-area > textarea', // 详情页，原弹窗的输入框
-    'div.chat-conversation > div.message-controls > div > div.chat-input', // 沟通列表-输入框；出错计数：1
+    'div.chat-conversation > div.message-controls > div > div.chat-input', // 沟通列表-输入框；出错计数：3，碰到“安全问题”
     (element, helloTxt) => {
       // element.value = helloTxt;
       element.innerText = helloTxt;
@@ -232,17 +238,17 @@ async function sendHello(node, marketPage) {
   // 2. 点击发送按钮
   // await detailPage.click('div.send-message');
   await detailPage.click('div.message-controls > div > div.chat-op > button');
-  await sleep(2000); // 等待接口响应
+  await sleep(1000); // 等待接口响应
   targetNum--;
 
   // 打印已投递公司名
   let { _companyName: companyName, _jobName: jobName } = node;
-  log(`✅：${companyName} ${jobName}`);
+  myLog(`✅：${companyName} ${jobName}`);
   hasPost.push(`${getCurrDate()}: ${companyName} ${jobName}`);
 
   await detailPage.close();
 
-  await sleep(1000); // 无意义，缓一缓
+  // await sleep(1000); // 无意义，缓一缓
 }
 
 async function getNewPage() {
@@ -252,22 +258,22 @@ async function getNewPage() {
 }
 async function getCurrHref(page) {
   let href = await page.evaluate(() => document.location.href);
-  log('🚀 getCurrHref ~ href:', href);
+  myLog('🚀 getCurrHref ~ href:', href);
   return href;
 }
 
 async function autoCommit() {
   await exec('git add --all'); // mail-error.png mail.png hahPostCompany.txt
   const { stdout, stderr } = await exec('git status');
-  log('🚀 ~ file: index.js:286 ~ autoCommit ~ stdout, stderr :', stdout, stderr);
+  // myLog('🚀 ~ file: index.js:286 ~ autoCommit ~ stdout, stderr :', stdout, stderr);
 
-  if (stdout.includes('nothing to commit')) return console.log('❗无内容提交');
+  if (stdout.includes('nothing to commit')) return myLog('❗无内容提交');
   await exec('git config --global user.email "1742284391@qq.com"');
   await exec('git config --global user.name "engvuchen"');
   // await exec('git add hahPostCompany.txt');
   await exec('git commit -m "U hahPostCompany"');
   await exec('git push');
-  log('✨自动提交已投递公司记录成功！');
+  myLog('✨自动提交已投递公司记录成功！');
 }
 function getNewMarketUrl(pageNum) {
   if (pageNum) queryParams.page = pageNum;
@@ -294,9 +300,8 @@ async function asyncFilter(list = [], fn) {
   const results = await Promise.all(list.map(fn)); // 并发完成
   return list.filter((_v, index) => results[index]);
 }
-function log(name = '', txt = '') {
-  console.log(name, txt);
-  logs.push(txt);
+function myLog(name = '', txt = '') {
+  logs.push(`${[name, txt].join(' ')}`);
 }
 function isError(res) {
   if (res.stack && res.message) {
