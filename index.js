@@ -25,15 +25,7 @@ let targetNum; // 30个需大概4m30s
 let hasPost = [];
 // let hasScreenShot = false;
 let logs = [];
-// 前端开发工程师 / 深圳南山 / 工作经验 1-3年 / 薪资待遇 10-20K / 学历要求 本科
-let queryParams = {
-  query: '前端开发工程师',
-  city: 101280600,
-  experience: 104,
-  degree: 203,
-  salary: 405,
-  page: 1,
-};
+let queryParams = {};
 let cookies = [
   {
     name: 'wt2',
@@ -62,25 +54,8 @@ let excludeCompanies = [
   '人才',
   '信息技术',
 ];
-let excludeJobs = [
-  'Flutter',
-  'flutter',
-  'shopify',
-  'React',
-  'react',
-  'RN',
-  'React Native',
-  'PHP',
-  'WordPress',
-  'Front End',
-  'App',
-  'Angular',
-  'angular',
-  '混合',
-  'uniapp',
-  '游戏',
-];
-let helloTxt = ``;
+let excludeJobs = [];
+let helloTxt = '';
 
 // 读取已投递公司存储，执行 main；
 async function start(
@@ -101,7 +76,6 @@ async function start(
   try {
     myLog(`自动打招呼进行中, 本次目标: ${targetNum}; 请耐心等待`);
 
-    // await sleep(1000);
     await main(queryParams.page);
 
     myLog('✨任务顺利完成！');
