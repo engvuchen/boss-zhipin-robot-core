@@ -116,8 +116,8 @@ async function main(pageNum = 1) {
 /** 启动浏览器，写入 cookie */
 async function initBrowserAndSetCookie() {
   browser = await puppeteer.launch({
-    // headless: 'new', // 是否以浏览器视图调试
-    headless: false,
+    headless: 'new', // 是否以浏览器视图调试
+    // headless: false,
     // slowMo: 500, // 逻辑执行速度
     devtools: false,
     defaultViewport: null, // null 则页面和窗口大小一致
