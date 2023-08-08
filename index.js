@@ -81,33 +81,19 @@ async function start(
     myLog('✨任务顺利完成！');
   } catch (error) {
     myLog('🚀 ~ file: index.js:51 ~ error:', error);
-    // if (marketPage?.screenshot) {
-    //   myLog('监测到任务执行失败，开始截图');
-    //   await marketPage?.screenshot({
-    //     path: 'mail-error.png',
-    //     // fullPage: true,
-    //     clip: {
-    //       x: 0,
-    //       y: 0,
-    //       width: 1980,
-    //       height: 1080,
-    //     },
-    //   });
-    //   // await sendMail('mail-error.png', 'Node.js截图-任务失败');
-    //   myLog('✨截图成功');
-    // }
   }
   if (hasPost.length) {
     let hasPostCompanyStr = [originHasPostContent, '-------', hasPost.join('\n')].join('\n');
     await fs.writeFile(`${process.cwd()}/hahPostCompany.txt`, hasPostCompanyStr);
   }
-  // await autoCommit(); // 可能有异常，提交截图
   // process.exit();
+  await browser.close().catch(e => myLog('成功关闭无头浏览器'));
+  browser = null;
 }
 async function main(pageNum = 1) {
   myLog('页数:', pageNum, '; 剩余目标:', targetNum);
 
-  if (!marketPage) await initBrowserAndSetCookie();
+  if (!browser) await initBrowserAndSetCookie();
   let marketUrl = getNewMarketUrl(pageNum); // 出现验证页，说明 puppeteer 被检测了(403)
   myLog('岗位市场链接', marketUrl);
 
@@ -115,7 +101,7 @@ async function main(pageNum = 1) {
     waitUntil: 'networkidle2', // 与 waitForTimeout 冲突貌似只能存在一个
     // timeout: 60000,
   });
-  marketPage.waitForNavigation();
+  // marketPage.waitForNavigation(); // 加了，超时（默认3秒）会报错；关浏览器或页面，也报错
 
   // 关闭安全问题弹窗
   await marketPage.click('.dialog-account-safe > div.dialog-container > div.dialog-title > a').catch(e => e);
@@ -130,8 +116,8 @@ async function main(pageNum = 1) {
 /** 启动浏览器，写入 cookie */
 async function initBrowserAndSetCookie() {
   browser = await puppeteer.launch({
-    headless: 'new', // 是否以浏览器视图调试
-    // headless: false,
+    // headless: 'new', // 是否以浏览器视图调试
+    headless: false,
     // slowMo: 500, // 逻辑执行速度
     devtools: false,
     defaultViewport: null, // null 则页面和窗口大小一致
@@ -149,8 +135,10 @@ async function autoSayHello(marketPage) {
   let notPostJobs = await asyncFilter(jobCards, async node => {
     let jobName = await node.$eval('.job-name', node => node.innerText);
     let companyName = await node.$eval('.company-name', node => node.innerText);
+    let hasCommunicate = (await node.$eval('a.start-chat-btn', node => node.innerText)) === '继续沟通';
 
     if (
+      !hasCommunicate &&
       !excludeJobs.some(name => jobName.includes(name)) &&
       !excludeCompanies.some(name => companyName.includes(name))
     ) {
@@ -159,19 +147,7 @@ async function autoSayHello(marketPage) {
       return true;
     }
   });
-  myLog('未投递岗位：', notPostJobs?.length);
-
-  // if (hasScreenShot === false && jobCards?.length === 0) {
-  //   // 用于 Github Action 测试
-  //   myLog('监测到岗位列表为空，开始截图');
-  //   await marketPage.screenshot({
-  //     path: './mail.png',
-  //     fullPage: true,
-  //   });
-  //   // await sendMail();
-  //   myLog('✨截图成功');
-  //   hasScreenShot = true;
-  // }
+  myLog('白名单岗位：', notPostJobs?.length);
 
   while (notPostJobs.length && targetNum > 0) {
     let node = notPostJobs.shift();
@@ -220,35 +196,16 @@ async function sendHello(node, marketPage) {
   myLog(`✅：${companyName} ${jobName}`);
   hasPost.push(`${getCurrDate()}: ${companyName} ${jobName}`);
 
-  await detailPage.close();
+  return await detailPage.close();
 
   // await sleep(1000); // 无意义，缓一缓
 }
 
 async function getNewPage() {
   const page = await browser.newPage();
-  // await page.setViewport({ width: 1980, height: 1080 });
   return page;
 }
-async function getCurrHref(page) {
-  let href = await page.evaluate(() => document.location.href);
-  myLog('🚀 getCurrHref ~ href:', href);
-  return href;
-}
 
-async function autoCommit() {
-  await exec('git add --all'); // mail-error.png mail.png hahPostCompany.txt
-  const { stdout, stderr } = await exec('git status');
-  // myLog('🚀 ~ file: index.js:286 ~ autoCommit ~ stdout, stderr :', stdout, stderr);
-
-  if (stdout.includes('nothing to commit')) return myLog('❗无内容提交');
-  await exec('git config --global user.email "1742284391@qq.com"');
-  await exec('git config --global user.name "engvuchen"');
-  // await exec('git add hahPostCompany.txt');
-  await exec('git commit -m "U hahPostCompany"');
-  await exec('git push');
-  myLog('✨自动提交已投递公司记录成功！');
-}
 function getNewMarketUrl(pageNum) {
   if (pageNum) queryParams.page = pageNum;
   return `https://www.zhipin.com/web/geek/job?${Object.keys(queryParams)
