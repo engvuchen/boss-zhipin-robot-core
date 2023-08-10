@@ -12,9 +12,6 @@
  */
 
 const fs = require('fs/promises');
-const util = require('node:util');
-const exec = util.promisify(require('node:child_process').exec);
-
 const puppeteer = require('puppeteer-extra');
 const stealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(stealthPlugin());
@@ -23,7 +20,6 @@ let browser;
 let marketPage;
 let targetNum; // 30个需大概4m30s
 let hasPost = [];
-// let hasScreenShot = false;
 let logs = [];
 let queryParams = {};
 let cookies = [
@@ -168,26 +164,21 @@ async function sendHello(node, marketPage) {
   if (communityBtnInnerText.includes('继续沟通')) {
     return await detailPage.close();
   }
-  communityBtn.click(); // 点击后，详情页被替换为沟通列表页
+  communityBtn.click(); // 点击后，(1)出现小窗 （2）详情页被替换为沟通列表页
   await sleep(1000);
 
   // textarea 输入必须用以下方式触发，解除“发送”按钮禁用
   // 1. 找到打招呼输入框，输入内容，并触发 input 事件
-  // todo 可能出现“安全问题”验证，导致选择器失效
-  await detailPage.$eval(
-    // 'div.edit-area > textarea', // 详情页，原弹窗的输入框
-    'div.chat-conversation > div.message-controls > div > div.chat-input', // 沟通列表-输入框；出错计数：3，碰到“安全问题”
-    (element, helloTxt) => {
-      // element.value = helloTxt;
-      element.innerText = helloTxt;
-      element.dispatchEvent(new Event('input')); // 触发输入事件
-    },
-    helloTxt
-  );
 
+  const originModalTextarea = await detailPage.$('div.edit-area > textarea').catch(e => e); // 小窗输入
+  const jumpListTextarea = await detailPage
+    .$('div.chat-conversation > div.message-controls > div > div.chat-input')
+    .catch(e => e); // 沟通列表输入
+  const availableTextarea = originModalTextarea || jumpListTextarea;
+  await availableTextarea.type(helloTxt);
   // 2. 点击发送按钮
-  // await detailPage.click('div.send-message');
-  await detailPage.click('div.message-controls > div > div.chat-op > button');
+  await detailPage.click('div.send-message').catch(e => e); // 弹窗按钮
+  await detailPage.click('div.message-controls > div > div.chat-op > button').catch(e => e); // 跳转列表按钮
   await sleep(1000); // 等待接口响应
   targetNum--;
 
