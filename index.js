@@ -71,7 +71,7 @@ async function start(
   ({ targetNum, queryParams, wt2Cookie, excludeCompanies = [], excludeJobs = [], helloTxt } = conf);
   cookies[0].value = wt2Cookie;
 
-  let originHasPostContent = await fs.readFile(`${process.cwd()}/hahPostCompany.txt`, 'utf-8');
+  let originHasPostContent = await fs.readFile(`${process.cwd()}/hasPostCompany.txt`, 'utf-8');
 
   try {
     myLog(`自动打招呼进行中, 本次目标: ${targetNum}; 请耐心等待`);
@@ -84,7 +84,7 @@ async function start(
   }
   if (hasPost.length) {
     let hasPostCompanyStr = [originHasPostContent, '-------', hasPost.join('\n')].join('\n');
-    await fs.writeFile(`${process.cwd()}/hahPostCompany.txt`, hasPostCompanyStr);
+    await fs.writeFile(`${process.cwd()}/hasPostCompany.txt`, hasPostCompanyStr);
   }
   // process.exit();
   await browser.close().catch(e => myLog('成功关闭无头浏览器'));
