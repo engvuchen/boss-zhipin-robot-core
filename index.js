@@ -18,10 +18,14 @@ puppeteer.use(stealthPlugin());
 
 let browser;
 let marketPage;
-let targetNum; // 30个需大概4m30s
 let hasPost = [];
 let logs = [];
+
 let queryParams = {};
+let salaryStart = 0;
+let keySkills = [];
+let targetNum; // 30个需大概4m30s
+let helloTxt = '';
 let cookies = [
   {
     name: 'wt2',
@@ -38,33 +42,35 @@ let cookies = [
     secure: true,
   },
 ];
-let excludeCompanies = [
-  '阿里巴巴',
-  '字节跳动',
-  '今日头条',
-  '网易',
-  '腾讯',
-  '百度',
-  'Shopee',
-  '深圳腾娱互动科技',
-  '人才',
-  '信息技术',
-];
+let excludeCompanies = [];
 let excludeJobs = [];
-let helloTxt = '';
+let headless = 'new';
 
 // 读取已投递公司存储，执行 main；
 async function start(
   conf = {
-    targetNum,
     queryParams: {},
+    salaryStart,
+    keySkills: [],
+    targetNum: 2,
+    helloTxt: '',
     wt2Cookie: '',
     excludeCompanies: [],
     excludeJobs: [],
-    helloTxt: '',
+    headless: false,
   }
 ) {
-  ({ targetNum, queryParams, wt2Cookie, excludeCompanies = [], excludeJobs = [], helloTxt } = conf);
+  ({
+    queryParams = {},
+    salaryStart = 0,
+    keySkills = [],
+    targetNum = 2,
+    helloTxt = '',
+    wt2Cookie = '',
+    excludeCompanies = [],
+    excludeJobs = [],
+    headless = false,
+  } = conf);
   cookies[0].value = wt2Cookie;
 
   let originHasPostContent = await fs.readFile(`${process.cwd()}/hasPostCompany.txt`, 'utf-8');
@@ -76,7 +82,7 @@ async function start(
 
     myLog('✨任务顺利完成！');
   } catch (error) {
-    myLog('🚀 ~ file: index.js:51 ~ error:', error);
+    myLog('🚀执行错误', error);
   }
   if (hasPost.length) {
     let hasPostCompanyStr = [originHasPostContent, '-------', hasPost.join('\n')].join('\n');
@@ -87,7 +93,7 @@ async function start(
   browser = null;
 }
 async function main(pageNum = 1) {
-  myLog('页数:', pageNum, '; 剩余目标:', targetNum);
+  myLog('页数:', pageNum, '; 剩余目标:', targetNum, '; 自定义起薪:', `${salaryStart}K`);
 
   if (!browser) await initBrowserAndSetCookie();
   let marketUrl = getNewMarketUrl(pageNum); // 出现验证页，说明 puppeteer 被检测了(403)
@@ -112,7 +118,7 @@ async function main(pageNum = 1) {
 /** 启动浏览器，写入 cookie */
 async function initBrowserAndSetCookie() {
   browser = await puppeteer.launch({
-    headless: 'new', // 是否以浏览器视图调试
+    headless, // 是否以浏览器视图调试
     // headless: false,
     // slowMo: 500, // 逻辑执行速度
     devtools: false,
@@ -126,20 +132,25 @@ async function autoSayHello(marketPage) {
   // let cards = await marketPage.$$('li.job-card-wrapper'); // 卡片选择器
   // h3 > a，h3.innerText 可以拿到
   let jobCards = Array.from(await marketPage.$$('li.job-card-wrapper'));
-  // myLog('🚀 ~ file: index.js:122 ~ autoSayHello ~ jobCards:', jobCards?.length);
 
   let notPostJobs = await asyncFilter(jobCards, async node => {
-    let jobName = await node.$eval('.job-name', node => node.innerText);
-    let companyName = await node.$eval('.company-name', node => node.innerText);
-    let hasCommunicate = (await node.$eval('a.start-chat-btn', node => node.innerText)) === '继续沟通';
+    let notCommunicate = (await node.$eval('a.start-chat-btn', node => node.innerText)) !== '继续沟通';
+    let [oriSalaryMin, oriSalaryMax] = handleSalary(await node.$eval('.salary', node => node.innerText));
+    let availSalary = oriSalaryMax > salaryStart;
 
-    if (
-      !hasCommunicate &&
-      !excludeJobs.some(name => jobName.includes(name)) &&
-      !excludeCompanies.some(name => companyName.includes(name))
-    ) {
-      node._jobName = jobName;
-      node._companyName = companyName;
+    let jobName = (await node.$eval('.job-name', node => node.innerText)).toLowerCase();
+    let availJobName = !excludeJobs.some(name => jobName.includes(name));
+
+    let companyName = (await node.$eval('.company-name', node => node.innerText)).toLowerCase();
+    let availCompanyName = !excludeCompanies.some(name => companyName.includes(name));
+
+    if (notCommunicate && availSalary && availJobName && availCompanyName) {
+      Object.assign(node, {
+        _oriSalaryMin: oriSalaryMin,
+        _oriSalaryMax: oriSalaryMax,
+        _jobName: jobName,
+        _companyName: companyName,
+      });
       return true;
     }
   });
@@ -154,22 +165,26 @@ async function autoSayHello(marketPage) {
 // sendHello 至少有 3s 等待
 async function sendHello(node, marketPage) {
   await marketPage.evaluate(node => node.click(), node); // 点击公司卡片的右侧区域，打开公司详情页
-  await sleep(1000); // 等待资源加载
+  await sleep(1000); // 等待新页面
 
   // 一般只会有一个详情页。打开一页，执行一个任务，然后关闭页面
   let [detailPage] = (await browser.pages()).filter(page => page.url().startsWith('https://www.zhipin.com/job_detail'));
 
-  let communityBtn = await detailPage.$('.btn.btn-startchat');
+  let communityBtn = await detailPage.$('.btn.btn-startchat'); // todo waitForSelector
   let communityBtnInnerText = await detailPage.evaluate(communityBtn => communityBtn.innerText, communityBtn);
   if (communityBtnInnerText.includes('继续沟通')) {
     return await detailPage.close();
   }
+
+  let jobDetail = (await detailPage.$eval('.job-sec-text', node => node.innerText))?.toLowerCase();
+  if (keySkills.length && keySkills.some(skill => !jobDetail.includes(skill))) {
+    return await detailPage.close();
+  }
+
   communityBtn.click(); // 点击后，(1)出现小窗 （2）详情页被替换为沟通列表页
   await sleep(1000);
 
-  // textarea 输入必须用以下方式触发，解除“发送”按钮禁用
   // 1. 找到打招呼输入框，输入内容，并触发 input 事件
-
   const originModalTextarea = await detailPage.$('div.edit-area > textarea').catch(e => e); // 小窗输入
   const jumpListTextarea = await detailPage
     .$('div.chat-conversation > div.message-controls > div > div.chat-input')
@@ -179,12 +194,12 @@ async function sendHello(node, marketPage) {
   // 2. 点击发送按钮
   await detailPage.click('div.send-message').catch(e => e); // 弹窗按钮
   await detailPage.click('div.message-controls > div > div.chat-op > button').catch(e => e); // 跳转列表按钮
-  await sleep(1000); // 等待接口响应
+  await sleep(1000); // 等待消息发送
   targetNum--;
 
   // 打印已投递公司名
-  let { _companyName: companyName, _jobName: jobName } = node;
-  myLog(`✅：${companyName} ${jobName}`);
+  let { _oriSalaryMin: oriSalaryMin, _oriSalaryMax: oriSalaryMax, _companyName: companyName, _jobName: jobName } = node;
+  myLog(`✅ ${companyName} ${jobName} [${oriSalaryMin}-${oriSalaryMax}K]`);
   hasPost.push(`${getCurrDate()}: ${companyName} ${jobName}`);
 
   return await detailPage.close();
@@ -224,6 +239,12 @@ async function asyncFilter(list = [], fn) {
 }
 function myLog(name = '', txt = '') {
   logs.push(`${[name, txt].join(' ')}`);
+}
+// 处理 '18-35K·14薪' -> [18, 35]
+function handleSalary(str) {
+  let reg = /\d+/g;
+  let [minStr, maxStr] = str.match(reg);
+  return [+minStr, +maxStr];
 }
 function isError(res) {
   if (res.stack && res.message) {
