@@ -22,7 +22,6 @@ let textareaSelector;
 let queryParams = {};
 let salaryStart = 0;
 let keySkills = [];
-let targetNum; // 30个需大概4m30s
 let helloTxt = '';
 let cookies = [
   {
@@ -42,32 +41,23 @@ let cookies = [
 ];
 let excludeCompanies = [];
 let excludeJobs = [];
+let targetNum; // 30个需大概4m30s
+let timeout = 3000;
 let headless = 'new';
 
 // 读取已投递公司存储，执行 main；
-async function start(
-  conf = {
-    queryParams: {},
-    salaryStart,
-    keySkills: [],
-    targetNum: 2,
-    helloTxt: '',
-    wt2Cookie: '',
-    excludeCompanies: [],
-    excludeJobs: [],
-    headless: false,
-  }
-) {
+async function start(conf = {}) {
   ({
     queryParams = {},
     salaryStart = 0,
     keySkills = [],
-    targetNum = 2,
     helloTxt = '',
     wt2Cookie = '',
+    targetNum = 2,
+    timeout = 3000,
     excludeCompanies = [],
     excludeJobs = [],
-    headless = false,
+    headless = 'new',
   } = conf);
   cookies[0].value = wt2Cookie;
 
@@ -78,15 +68,15 @@ async function start(
 
     await main(queryParams.page);
 
-    myLog('✨任务顺利完成！');
+    myLog('✨ 任务顺利完成！');
   } catch (error) {
-    myLog('❌执行出错', error);
+    myLog('❌ 执行出错', error);
   }
   if (hasPost.length) {
     let hasPostCompanyStr = [originHasPostContent, '-------', hasPost.join('\n')].join('\n');
     await fs.writeFile(`${process.cwd()}/hasPostCompany.txt`, hasPostCompanyStr);
   }
-  // await browser.close().catch(e => myLog('关闭无头浏览器出错', e));
+  await browser.close().catch(e => myLog('关闭无头浏览器出错', e));
   browser = null;
 }
 async function main(pageNum = 1) {
@@ -138,7 +128,7 @@ async function initBrowserAndSetCookie() {
     defaultViewport: null, // null 则页面和窗口大小一致
   });
   marketPage = await getNewPage();
-  await marketPage.setDefaultTimeout(3000);
+  await marketPage.setDefaultTimeout(timeout);
   await marketPage.setCookie(...cookies);
 }
 async function autoSayHello(marketPage) {
@@ -185,7 +175,7 @@ async function sendHello(node, marketPage) {
 
   // 一般只会有一个详情页。打开一页，执行一个任务，然后关闭页面
   let [detailPage] = (await browser.pages()).filter(page => page.url().startsWith('https://www.zhipin.com/job_detail'));
-  detailPage.setDefaultTimeout(3000);
+  detailPage.setDefaultTimeout(timeout);
 
   let { _oriSalaryMin: oriSalaryMin, _oriSalaryMax: oriSalaryMax, _companyName: companyName, _jobName: jobName } = node;
   let communityBtn = await detailPage.waitForSelector('.btn.btn-startchat').catch(e => {
@@ -240,7 +230,7 @@ function getNewMarketUrl(pageNum) {
     .map(key => `${key}=${encodeURIComponent(queryParams[key])}`)
     .join('&')}`;
 }
-// 获取输入框选择器，需经过 setDefaultTimeout（自定义为 3s）
+// 获取输入框选择器，需经过 setDefaultTimeout 耗时（自定义为 3s）
 async function initTextareaSelector(page, returnNode = false) {
   let originModalTextareaSelector = 'div.edit-area > textarea';
   let jumpListTextareaSelector = 'div.chat-conversation > div.message-controls > div > div.chat-input';
