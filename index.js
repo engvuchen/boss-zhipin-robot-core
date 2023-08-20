@@ -17,6 +17,11 @@ let browser;
 let marketPage;
 let hasPost = [];
 let logs = [];
+let onetimeStatus = {
+  initMarketPage: false,
+  checkSafeQues: false,
+  checkLogin: false,
+};
 let textareaSelector;
 
 let queryParams = {};
@@ -61,6 +66,8 @@ async function start(conf = {}) {
   } = conf);
   cookies[0].value = wt2Cookie;
 
+  resetOnetimeStatus();
+
   let originHasPostContent = await fs.readFile(`${process.cwd()}/hasPostCompany.txt`, 'utf-8');
 
   try {
@@ -84,20 +91,21 @@ async function main(pageNum = 1) {
 
   if (!browser) await initBrowserAndSetCookie();
 
-  // 关闭安全问题弹窗
-  await marketPage.click('.dialog-account-safe > div.dialog-container > div.dialog-title > a').catch(e => e);
-
   // 打开新页面或通过页码组件进行翻页
-  if (pageNum === 1) {
+  if (!onetimeStatus.initMarketPage) {
     let marketUrl = getNewMarketUrl(pageNum); // 出现验证页，说明 puppeteer 被检测了(403)
-    myLog('岗位市场链接', marketUrl);
     await marketPage.goto(marketUrl, {
       waitUntil: 'networkidle2', // 与 waitForTimeout 冲突貌似只能存在一个
       // timeout: 60000,
     });
+
+    await onetimeCheck();
+    onetimeStatus.initMarketPage = true;
+    myLog('打开岗位页面成功');
     // marketPage.waitForNavigation(); // 加了，超时（默认3秒）会报错；关浏览器或页面，也报错
   } else {
-    // todo 点击页码；偶尔出现 BOSS 等待（检测，网页久久不动，会触发资源更新）
+    myLog('通过页码组件翻页');
+    // 点击页码；偶尔出现 BOSS 等待（网页久久不动，会触发资源更新）
     await marketPage.waitForSelector('.options-pages > a');
     let pageNumList = Array.from(await marketPage.$$('.options-pages > a')).slice(1, -1); // 页码开头、结尾是导航箭头，不需要
     let numList = await Promise.all(
@@ -131,9 +139,35 @@ async function initBrowserAndSetCookie() {
   await marketPage.setDefaultTimeout(timeout);
   await marketPage.setCookie(...cookies);
 }
+// 检查是否登录、关闭安全问题
+async function onetimeCheck() {
+  if (!onetimeStatus.checkLogin) {
+    const headerLoginBtn = await marketPage.waitForSelector('.header-login-btn').catch(e => {
+      onetimeStatus.checkLogin = true;
+      myLog('登录态有效');
+    });
+    console.log('headerLoginBtn', headerLoginBtn);
+    if (headerLoginBtn) {
+      throw new Error('登录态过期，请重新获取 cookie');
+    }
+  }
+  if (!onetimeStatus.checkSafeQues) {
+    // 关闭安全问题弹窗
+    await marketPage.click('.dialog-account-safe > div.dialog-container > div.dialog-title > a').catch(e => {
+      myLog('未检测到安全问题弹窗');
+    });
+    onetimeStatus.checkSafeQues = true;
+  }
+}
+function resetOnetimeStatus() {
+  Object.keys(onetimeStatus).forEach(key => {
+    onetimeStatus[key] = false;
+  });
+}
+
 async function autoSayHello(marketPage) {
   await marketPage.waitForSelector('li.job-card-wrapper').catch(e => {
-    throw new Error('3s内未获取岗位列表');
+    throw new Error('3s 内未获取岗位列表');
   });
   let jobCards = Array.from(await marketPage.$$('li.job-card-wrapper'));
   if (!jobCards?.length) {
@@ -179,7 +213,7 @@ async function sendHello(node, marketPage) {
 
   let { _oriSalaryMin: oriSalaryMin, _oriSalaryMax: oriSalaryMax, _companyName: companyName, _jobName: jobName } = node;
   let communityBtn = await detailPage.waitForSelector('.btn.btn-startchat').catch(e => {
-    myLog('3s内未获取到详情页沟通按钮');
+    myLog('3s 内未获取到详情页沟通按钮');
     throw new Error(e);
   });
   let communityBtnInnerText = await detailPage.evaluate(communityBtn => communityBtn.innerText, communityBtn);
@@ -202,7 +236,7 @@ async function sendHello(node, marketPage) {
     availableTextarea = await initTextareaSelector(detailPage, true);
   } else {
     availableTextarea = await detailPage.waitForSelector(textareaSelector).catch(e => {
-      throw new Error(`使用 ${textareaSelector}，3s内未获取输入框`);
+      throw new Error(`使用 ${textareaSelector}，3s 内未获取输入框`);
     });
     if (!availableTextarea) throw new Error('没有可用的输入框');
   }
@@ -236,10 +270,10 @@ async function initTextareaSelector(page, returnNode = false) {
   let jumpListTextareaSelector = 'div.chat-conversation > div.message-controls > div > div.chat-input';
 
   const originModalTextarea = await page.waitForSelector(originModalTextareaSelector).catch(e => {
-    myLog('3s内未获取到小窗输入框');
+    myLog('3s 内未获取到小窗输入框');
   }); // 小窗输入
   const jumpListTextarea = await page.waitForSelector(jumpListTextareaSelector).catch(e => {
-    myLog('3s内未获取到沟通列表输入框');
+    myLog('3s 内未获取到沟通列表输入框');
   }); // 沟通列表输入
 
   const selector =
@@ -277,6 +311,7 @@ function handleSalary(str) {
   let [minStr, maxStr] = str.match(reg);
   return [+minStr, +maxStr];
 }
+
 function isError(res) {
   if (res.stack && res.message) {
     return true;
