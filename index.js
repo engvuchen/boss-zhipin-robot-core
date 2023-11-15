@@ -65,6 +65,8 @@ async function start(conf = {}) {
     headless = 'new',
   } = conf);
   cookies[0].value = wt2Cookie;
+  excludeCompanies = excludeCompanies.map(company => company.toLowerCase());
+  excludeJobs = excludeJobs.map(job => job.toLowerCase());
 
   resetOnetimeStatus();
 
