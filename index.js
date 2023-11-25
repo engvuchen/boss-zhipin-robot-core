@@ -8,14 +8,14 @@
  * 4. 遇到问题，以 headless=false 进行调试
  */
 
-const fs = require('fs/promises');
+// const fs = require('fs/promises');
 const puppeteer = require('puppeteer-extra');
 const stealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(stealthPlugin());
 
 let browser;
 let marketPage;
-let hasPost = [];
+// let hasPost = [];
 let logs = [];
 let onetimeStatus = {
   initMarketPage: false,
@@ -25,7 +25,7 @@ let onetimeStatus = {
 let textareaSelector;
 
 let queryParams = {};
-let salaryStart = 0;
+let salaryRange = [0, Infinity];
 let keySkills = [];
 let helloTxt = '';
 let cookies = [
@@ -54,7 +54,7 @@ let headless = 'new';
 async function start(conf = {}) {
   ({
     queryParams = {},
-    salaryStart = 0,
+    salaryRange = [0, Infinity],
     keySkills = [],
     helloTxt = '',
     wt2Cookie = '',
@@ -70,7 +70,7 @@ async function start(conf = {}) {
 
   resetOnetimeStatus();
 
-  let originHasPostContent = await fs.readFile(`${process.cwd()}/hasPostCompany.txt`, 'utf-8');
+  // let originHasPostContent = await fs.readFile(`${process.cwd()}/hasPostCompany.txt`, 'utf-8');
 
   try {
     myLog(`⏳ 自动打招呼进行中, 本次目标: ${targetNum}; 请耐心等待`);
@@ -81,15 +81,20 @@ async function start(conf = {}) {
   } catch (error) {
     myLog('❌ 执行出错', error);
   }
-  if (hasPost.length) {
-    let hasPostCompanyStr = [originHasPostContent, '-------', hasPost.join('\n')].join('\n');
-    await fs.writeFile(`${process.cwd()}/hasPostCompany.txt`, hasPostCompanyStr);
-  }
+  // 已投递公司在 BOSS 上可查。“已沟通”的判断，是列表上点击过这个岗位，不是有没有给HR发送招呼语
+  // if (hasPost.length) {
+  //   let hasPostCompanyStr = [originHasPostContent, '-------', hasPost.join('\n')].join('\n');
+  //   await fs.writeFile(`${process.cwd()}/hasPostCompany.txt`, hasPostCompanyStr);
+  // }
   await browser.close().catch(e => myLog('关闭无头浏览器出错', e));
   browser = null;
 }
 async function main(pageNum = 1) {
-  myLog(`页数：${pageNum}；剩余目标：${targetNum}；自定义起薪：${salaryStart}`);
+  myLog(
+    `页数：${pageNum}；剩余目标：${targetNum}；自定义薪资范围：${
+      salaryRange[1] === Infinity ? '不限。' : ''
+    }[${salaryRange.join(', ')}]`
+  );
 
   if (!browser) await initBrowserAndSetCookie();
 
@@ -107,17 +112,23 @@ async function main(pageNum = 1) {
     // marketPage.waitForNavigation(); // 加了，超时（默认3秒）会报错；关浏览器或页面，也报错
   } else {
     myLog('通过页码组件翻页');
-    // 点击页码；偶尔出现 BOSS 等待（网页久久不动，会触发资源更新）
+    // 点击页码；偶尔出现 BOSS 等待（网页久久不动，会触发资源更新）；最多显示 10 页（一页 30 个岗位）
     await marketPage.waitForSelector('.options-pages > a');
     let pageNumList = Array.from(await marketPage.$$('.options-pages > a')).slice(1, -1); // 页码开头、结尾是导航箭头，不需要
     let numList = await Promise.all(
       pageNumList.map(async node => {
-        return Number(await marketPage.evaluate(node => node.innerText, node));
+        let txt = await marketPage.evaluate(node => node.innerText, node);
+        return Number(txt) || '...';
       })
     );
     let foundIndex = numList.findIndex(num => num === pageNum);
-    if (foundIndex === -1) throw new Error(`页码不匹配，${numList.join(',')}`);
-
+    if (foundIndex === -1) {
+      if (pageNum <= 10) {
+        throw new Error(`页码不匹配，当前页码：${numList.join(',')}`);
+      } else {
+        throw new Error(`BOSS 最多返回10页查询结果`);
+      }
+    }
     await marketPage.evaluate(node => node.click(), pageNumList[foundIndex]);
   }
 
@@ -148,7 +159,6 @@ async function onetimeCheck() {
       onetimeStatus.checkLogin = true;
       myLog('登录态有效');
     });
-    console.log('headerLoginBtn', headerLoginBtn);
     if (headerLoginBtn) {
       throw new Error('登录态过期，请重新获取 cookie');
     }
@@ -179,7 +189,13 @@ async function autoSayHello(marketPage) {
   let notPostJobs = await asyncFilter(jobCards, async node => {
     let notCommunicate = (await node.$eval('a.start-chat-btn', node => node.innerText)) !== '继续沟通'; // 岗位卡片存在，是否沟通的文案
     let [oriSalaryMin, oriSalaryMax] = handleSalary(await node.$eval('.salary', node => node.innerText));
-    let availSalary = oriSalaryMax > salaryStart;
+
+    // 开区间
+    let [customSalaryMin, customSalaryMax] = salaryRange;
+    let availSalary =
+      customSalaryMax === Infinity
+        ? true // [0, Infinity]，所有工作薪资都比 0 高
+        : oriSalaryMax >= customSalaryMax && customSalaryMin >= oriSalaryMin;
 
     let jobName = (await node.$eval('.job-name', node => node.innerText)).toLowerCase();
     let availJobName = !excludeJobs.some(name => jobName.includes(name));
@@ -251,7 +267,7 @@ async function sendHello(node, marketPage) {
 
   // 打印已投递公司名
   myLog(`✅ ${companyName} ${jobName} [${oriSalaryMin}-${oriSalaryMax}K]`);
-  hasPost.push(`${getCurrDate()}: ${companyName} ${jobName}`);
+  // hasPost.push(`${getCurrDate()}: ${companyName} ${jobName}`);
 
   return await detailPage.close();
 }
