@@ -25,8 +25,6 @@ let onetimeStatus = {
 let textareaSelector;
 
 let queryParams = {};
-let salaryRange = [0, Infinity];
-let keySkills = [];
 let helloTxt = '';
 let cookies = [
     {
@@ -44,24 +42,30 @@ let cookies = [
         secure: true,
     },
 ];
+let targetNum;
+let timeout = 3000;
+let salaryRange = [0, Infinity];
+let keySkills = [];
+// let jobUpdateTime = 0;
 let excludeCompanies = [];
 let excludeJobs = [];
-let targetNum; // 30个需大概4m30s
-let timeout = 3000;
-let headless = 'new';
 
+let headless = 'new';
 let openNewTabTime = 1000;
+
+// let currJobList = [];
 
 // 读取已投递公司存储，执行 main；
 async function start(conf = {}) {
     ({
         queryParams = {},
-        salaryRange = [0, Infinity],
-        keySkills = [],
         helloTxt = '',
         wt2Cookie = '',
         targetNum = 2,
         timeout = 3000,
+        salaryRange = [0, Infinity],
+        keySkills = [],
+        // jobUpdateTime = 365,
         excludeCompanies = [],
         excludeJobs = [],
         headless = 'new',
@@ -93,6 +97,7 @@ async function start(conf = {}) {
     }
 
     await browser?.close()?.catch(e => myLog('关闭无头浏览器出错', e));
+
     browser = null;
     marketPage = null;
 }
@@ -164,6 +169,44 @@ async function initBrowserAndSetCookie() {
     }
 
     marketPage = await getNewPage();
+
+    // 设置监听函数，捕获所有网络请求
+    // marketPage.on('requestfinished', async req => {
+    //     if (!req.url().includes('/search/joblist.json')) {
+    //         return;
+    //     }
+
+    //     console.log('req.url()', req.url());
+    //     console.log('req.method()', req.method());
+
+    //     // 这个检测不出来是重定向
+    //     // if (req.isNavigationRequest() && frame() === page.mainFrame()) {
+    //     //     console.log(`== NAVIGATION COMMITTED TO ${req.url()} ==`);
+    //     // }
+
+    //     const response = req.response();
+    //     let status = response.status();
+    //     console.log('🔎 ~ initBrowserAndSetCookie ~ status:', status); // 都是 200
+
+    //     // if (response.status() !== 200) return;
+
+    //     console.log('🔎 444 ~ initBrowserAndSetCookie ~ response.body:', response.body);
+
+    //     // if (!response.body) return; // 都不存在？
+
+    //     // // /search/joblist.json 发生重定向，response.json 经过 response.body 一定有问题
+    //     try {
+    //         // console.log('response.buffer', response.buffer); // 一直存在
+    //         // const buffer = await response.buffer(); // 重定向。buffer 也会调用失败
+    //         // console.log('🔎 ~ initBrowserAndSetCookie ~ response.body:', response.body); // response.body 一直 undefined
+
+    //         const res = await response.json(); // 获取接口返回的 JSON 数据。这里总是出问题
+    //         currJobList = res.zpData.jobList;
+    //     } catch (e) {
+    //         console.error(`- failed: ${e}`);
+    //     }
+    // });
+
     await marketPage.setDefaultTimeout(timeout);
     await marketPage.setCookie(...cookies);
 }
@@ -201,32 +244,60 @@ async function autoSayHello(marketPage) {
         throw new Error('岗位列表为空');
     }
 
-    let notPostJobs = await asyncFilter(jobCards, async node => {
-        let notCommunicate = (await node.$eval('a.start-chat-btn', node => node.innerText)) !== '继续沟通'; // 岗位卡片存在，是否沟通的文案
-        let [oriSalaryMin, oriSalaryMax] = handleSalary(await node.$eval('.salary', node => node.innerText));
+    let notPostJobs = await asyncFilter(jobCards, async (node, index) => {
+        // 选择未沟通的岗位
+        let notCommunicate = (await node.$eval('a.start-chat-btn', node => node.innerText)) !== '继续沟通';
+        if (!notCommunicate) {
+            myLog(`🎃 略过一个曾沟通岗位`);
+            return false;
+        }
 
-        // 开区间
+        // 筛选公司名
+        let companyName = (await node.$eval('.company-name', node => node.innerText)).toLowerCase();
+        let excludeCompanyName = excludeCompanies.find(name => companyName.includes(name));
+        if (excludeCompanyName) {
+            myLog(`🎃 略过 ${companyName}，包含屏蔽公司关键词（${excludeCompanyName}）`);
+            return false;
+        }
+
+        // 筛选岗位名
+        let jobName = (await node.$eval('.job-name', node => node.innerText)).toLowerCase();
+        let excludeJobName = excludeJobs.find(name => jobName.includes(name));
+        if (excludeJobName) {
+            myLog(`🎃 略过 ${jobName}，包含屏蔽工作关键词（${excludeJobName}）`);
+            return false;
+        }
+
+        // 筛选岗位最近更新时间 - lastModifyTime 被官方去掉了
+        // console.log('index', index, currJobList[index], currJobList[index].lastModifyTime);
+        // let diff = daysBetween(currJobList[index].lastModifyTime);
+        // let availDayDistance = jobUpdateTime >= diff;
+        // if (!availDayDistance) {
+        //     myLog(`🎃 略过 ${companyName} ${jobName}，距离 ${diff} 天更新，不满足 ${jobUpdateTime} 天内更新过`);
+        //     return false;
+        // }
+
+        // 筛选薪资
+        let [oriSalaryMin, oriSalaryMax] = handleSalary(await node.$eval('.salary', node => node.innerText));
         let [customSalaryMin, customSalaryMax] = salaryRange;
         let availSalary =
             customSalaryMax === Infinity
                 ? true // [0, Infinity]，所有工作薪资都比 0 高
-                : oriSalaryMax >= customSalaryMax && customSalaryMin >= oriSalaryMin;
-
-        let jobName = (await node.$eval('.job-name', node => node.innerText)).toLowerCase();
-        let availJobName = !excludeJobs.some(name => jobName.includes(name));
-
-        let companyName = (await node.$eval('.company-name', node => node.innerText)).toLowerCase();
-        let availCompanyName = !excludeCompanies.some(name => companyName.includes(name));
-
-        if (notCommunicate && availSalary && availJobName && availCompanyName) {
-            Object.assign(node, {
-                _oriSalaryMin: oriSalaryMin,
-                _oriSalaryMax: oriSalaryMax,
-                _jobName: jobName,
-                _companyName: companyName,
-            });
-            return true;
+                : customSalaryMax >= oriSalaryMin && customSalaryMin <= oriSalaryMax;
+        if (!availSalary) {
+            myLog(
+                `🎃 略过 ${companyName} ${jobName}，当前 [${oriSalaryMin}, ${oriSalaryMax}], 不满足 [${customSalaryMin}, ${customSalaryMax}]`
+            );
+            return false;
         }
+
+        Object.assign(node, {
+            _oriSalaryMin: oriSalaryMin,
+            _oriSalaryMax: oriSalaryMax,
+            _jobName: jobName,
+            _companyName: companyName,
+        });
+        return true;
     });
     myLog('初筛岗位数量：', notPostJobs?.length);
 
@@ -235,7 +306,7 @@ async function autoSayHello(marketPage) {
         await sendHello(node, marketPage);
     }
 }
-// sendHello 至少有 3s 等待
+// sendHello 跳转到岗位详情页。至少有 3s 等待
 async function sendHello(node, marketPage) {
     await marketPage.evaluate(node => node.click(), node); // 点击节点，打开公司详情页
     await sleep(openNewTabTime); // 远程浏览器。此处连接或新开页面，时间都会变动。等待新页面
@@ -252,6 +323,7 @@ async function sendHello(node, marketPage) {
         _companyName: companyName,
         _jobName: jobName,
     } = node;
+
     let communityBtn = await detailPage.waitForSelector('.btn.btn-startchat').catch(e => {
         myLog(`${timeout / 1000}s 内未获取到详情页沟通按钮`);
         throw new Error(e);
@@ -263,8 +335,9 @@ async function sendHello(node, marketPage) {
     }
 
     let jobDetail = (await detailPage.$eval('.job-sec-text', node => node.innerText))?.toLowerCase();
-    if (keySkills.length && keySkills.some(skill => !jobDetail.includes(skill))) {
-        myLog(`🎃 略过：${companyName} ${jobName}，工作内容不包含关键技能；${keySkills.join(',')}`);
+    let notFoundSkill = keySkills.find(skill => !jobDetail.includes(skill));
+    if (keySkills.length && notFoundSkill) {
+        myLog(`🎃 略过：${companyName} ${jobName}，工作内容不包含关键技能；${notFoundSkill}`);
         return await detailPage.close();
     }
 
@@ -307,12 +380,14 @@ async function initTextareaSelector(page, returnNode = false) {
     let originModalTextareaSelector = 'div.edit-area > textarea';
     let jumpListTextareaSelector = 'div.chat-conversation > div.message-controls > div > div.chat-input';
 
+    // 小窗输入
     const originModalTextarea = await page.waitForSelector(originModalTextareaSelector).catch(e => {
-        myLog('3s 内未获取到小窗输入框');
-    }); // 小窗输入
+        myLog(`${timeout / 1000}s 内未获取到小窗输入框`);
+    });
+    // 沟通列表输入
     const jumpListTextarea = await page.waitForSelector(jumpListTextareaSelector).catch(e => {
-        myLog('3s 内未获取到沟通列表输入框');
-    }); // 沟通列表输入
+        myLog(`${timeout / 1000}s 内未获取到沟通列表输入框`);
+    });
 
     const selector =
         (originModalTextarea && originModalTextareaSelector) || (jumpListTextarea && jumpListTextareaSelector);
@@ -321,24 +396,8 @@ async function initTextareaSelector(page, returnNode = false) {
     if (returnNode) return originModalTextarea || jumpListTextarea;
 }
 
-function sleep(time = 1000) {
-    return new Promise((resolve, reject) => {
-        setTimeout(resolve, time);
-    });
-}
-
-function getCurrDate() {
-    let stamp = new Date();
-    let year = stamp.getFullYear();
-    let month = ('0' + (stamp.getMonth() + 1)).slice(-2);
-    let date = ('0' + stamp.getDate()).slice(-2);
-    let hours = ('0' + stamp.getHours()).slice(-2);
-    let mins = ('0' + stamp.getMinutes()).slice(-2);
-    let seconds = ('0' + stamp.getSeconds()).slice(-2);
-    return `${year}年${month}月${date}日 ${hours}时${mins}分${seconds}秒`;
-}
 async function asyncFilter(list = [], fn) {
-    const results = await Promise.all(list.map(fn)); // 并发完成
+    const results = await Promise.all(list.map(fn)); // 建设成功返回 true，失败返回 false
     return list.filter((_v, index) => results[index]);
 }
 function myLog(...args) {
@@ -350,7 +409,16 @@ function handleSalary(str) {
     let [minStr, maxStr] = str.match(reg);
     return [+minStr, +maxStr];
 }
-
+function getCurrDate() {
+    let stamp = new Date();
+    let year = stamp.getFullYear();
+    let month = ('0' + (stamp.getMonth() + 1)).slice(-2);
+    let date = ('0' + stamp.getDate()).slice(-2);
+    let hours = ('0' + stamp.getHours()).slice(-2);
+    let mins = ('0' + stamp.getMinutes()).slice(-2);
+    let seconds = ('0' + stamp.getSeconds()).slice(-2);
+    return `${year}年${month}月${date}日 ${hours}时${mins}分${seconds}秒`;
+}
 function isError(res) {
     if (res.stack && res.message) {
         return true;
@@ -367,6 +435,15 @@ function promiseQueue(list) {
             });
         }, Promise.resolve())
         .catch(err => `promiseQueue err: ${err}`);
+}
+function daysBetween(start = Data.now(), end = Date.now()) {
+    const msPerDay = 24 * 60 * 60 * 1000; // 每天的毫秒数
+    return Math.round((end - start) / msPerDay);
+}
+function sleep(time = 1000) {
+    return new Promise((resolve, reject) => {
+        setTimeout(resolve, time);
+    });
 }
 
 module.exports = { main: start, logs };
