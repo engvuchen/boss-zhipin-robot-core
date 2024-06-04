@@ -83,6 +83,7 @@ async function start(conf = {}) {
 
         myLog('✨ 任务顺利完成！');
     } catch (error) {
+        myLog('执行出错，未投递：', targetNum);
         myLog('❌ 执行出错', error);
 
         // BOSS安全检测随时可能触发，每一次检测都会耗时，改为报错后检测是否此原因导致的
@@ -169,43 +170,6 @@ async function initBrowserAndSetCookie() {
     }
 
     marketPage = await getNewPage();
-
-    // 设置监听函数，捕获所有网络请求
-    // marketPage.on('requestfinished', async req => {
-    //     if (!req.url().includes('/search/joblist.json')) {
-    //         return;
-    //     }
-
-    //     console.log('req.url()', req.url());
-    //     console.log('req.method()', req.method());
-
-    //     // 这个检测不出来是重定向
-    //     // if (req.isNavigationRequest() && frame() === page.mainFrame()) {
-    //     //     console.log(`== NAVIGATION COMMITTED TO ${req.url()} ==`);
-    //     // }
-
-    //     const response = req.response();
-    //     let status = response.status();
-    //     console.log('🔎 ~ initBrowserAndSetCookie ~ status:', status); // 都是 200
-
-    //     // if (response.status() !== 200) return;
-
-    //     console.log('🔎 444 ~ initBrowserAndSetCookie ~ response.body:', response.body);
-
-    //     // if (!response.body) return; // 都不存在？
-
-    //     // // /search/joblist.json 发生重定向，response.json 经过 response.body 一定有问题
-    //     try {
-    //         // console.log('response.buffer', response.buffer); // 一直存在
-    //         // const buffer = await response.buffer(); // 重定向。buffer 也会调用失败
-    //         // console.log('🔎 ~ initBrowserAndSetCookie ~ response.body:', response.body); // response.body 一直 undefined
-
-    //         const res = await response.json(); // 获取接口返回的 JSON 数据。这里总是出问题
-    //         currJobList = res.zpData.jobList;
-    //     } catch (e) {
-    //         console.error(`- failed: ${e}`);
-    //     }
-    // });
 
     await marketPage.setDefaultTimeout(timeout);
     await marketPage.setCookie(...cookies);
