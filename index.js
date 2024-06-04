@@ -83,7 +83,7 @@ async function start(conf = {}) {
 
         myLog('✨ 任务顺利完成！');
     } catch (error) {
-        myLog('执行出错，未投递：', targetNum);
+        myLog('👉 执行出错，未投递：', targetNum);
         myLog('❌ 执行出错', error);
 
         // BOSS安全检测随时可能触发，每一次检测都会耗时，改为报错后检测是否此原因导致的
@@ -209,26 +209,28 @@ async function autoSayHello(marketPage) {
     }
 
     let notPostJobs = await asyncFilter(jobCards, async (node, index) => {
+        let companyName = (await node.$eval('.company-name', node => node.innerText)).toLowerCase();
+        let jobName = (await node.$eval('.job-name', node => node.innerText)).toLowerCase();
+        let fullName = `${jobName}（${companyName}）`;
+        
         // 选择未沟通的岗位
         let notCommunicate = (await node.$eval('a.start-chat-btn', node => node.innerText)) !== '继续沟通';
         if (!notCommunicate) {
-            myLog(`🎃 略过一个曾沟通岗位`);
+            myLog(`🎃 略过${fullName}：曾沟通`);
             return false;
         }
 
         // 筛选公司名
-        let companyName = (await node.$eval('.company-name', node => node.innerText)).toLowerCase();
         let excludeCompanyName = excludeCompanies.find(name => companyName.includes(name));
         if (excludeCompanyName) {
-            myLog(`🎃 略过 ${companyName}，包含屏蔽公司关键词（${excludeCompanyName}）`);
+            myLog(`🎃 略过 ${fullName}，包含屏蔽公司关键词（${excludeCompanyName}）`);
             return false;
         }
 
         // 筛选岗位名
-        let jobName = (await node.$eval('.job-name', node => node.innerText)).toLowerCase();
         let excludeJobName = excludeJobs.find(name => jobName.includes(name));
         if (excludeJobName) {
-            myLog(`🎃 略过 ${jobName}，包含屏蔽工作关键词（${excludeJobName}）`);
+            myLog(`🎃 略过 ${fullName}，包含屏蔽工作关键词（${excludeJobName}）`);
             return false;
         }
 
@@ -250,7 +252,7 @@ async function autoSayHello(marketPage) {
                 : customSalaryMax >= oriSalaryMin && customSalaryMin <= oriSalaryMax;
         if (!availSalary) {
             myLog(
-                `🎃 略过 ${companyName} ${jobName}，当前 [${oriSalaryMin}, ${oriSalaryMax}], 不满足 [${customSalaryMin}, ${customSalaryMax}]`
+                `🎃 略过 ${fullName}，当前 [${oriSalaryMin}, ${oriSalaryMax}], 不满足 [${customSalaryMin}, ${customSalaryMax}]`
             );
             return false;
         }
@@ -305,7 +307,11 @@ async function sendHello(node, marketPage) {
         return await detailPage.close();
     }
 
+    // await sleep(500); // todo 沟通列表偶尔异常，可能是有些数据没有准备好？
+
     communityBtn.click(); // 点击后，(1)出现小窗 （2）详情页被替换为沟通列表页
+
+    // await sleep(500); //
 
     let availableTextarea;
     if (!textareaSelector) {
@@ -320,7 +326,7 @@ async function sendHello(node, marketPage) {
     // 2. 点击发送按钮
     await detailPage.click('div.send-message').catch(e => e); // 弹窗按钮
     await detailPage.click('div.message-controls > div > div.chat-op > button').catch(e => e); // 跳转列表按钮
-    await sleep(1000); // 等待消息发送
+    await sleep(500); // 等待消息发送
     targetNum--;
 
     // 已投递的公司名
