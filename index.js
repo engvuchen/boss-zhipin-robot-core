@@ -17,14 +17,15 @@ let browser;
 let marketPage;
 
 let logs = [];
+let ignoreNum = 0;
 let onetimeStatus = {
     initMarketPage: false,
     checkSafeQues: false,
     checkLogin: false,
 };
-let textareaSelector;
+let textareaSelector = '';
+let queryParams = {}; // { page, query, experience, salary }, 只用到 page
 
-let queryParams = {};
 let helloTxt = '';
 let cookies = [
     {
@@ -53,8 +54,6 @@ let excludeJobs = [];
 let headless = 'new';
 let openNewTabTime = 1000;
 
-// let currJobList = [];
-
 // 读取已投递公司存储，执行 main；
 async function start(conf = {}) {
     ({
@@ -70,9 +69,12 @@ async function start(conf = {}) {
         excludeJobs = [],
         headless = 'new',
     } = conf);
+
     cookies[0].value = wt2Cookie;
-    excludeCompanies = excludeCompanies.map(company => company.toLowerCase());
-    excludeJobs = excludeJobs.map(job => job.toLowerCase());
+
+    [keySkills, excludeCompanies, excludeJobs] = [keySkills, excludeCompanies, excludeJobs].map(list =>
+        list.map(item => item.toLowerCase())
+    );
 
     resetOnetimeStatus();
 
@@ -83,7 +85,8 @@ async function start(conf = {}) {
 
         myLog('✨ 任务顺利完成！');
     } catch (error) {
-        myLog('👉 执行出错，未投递：', targetNum);
+        myLog('当前页码', queryParams.page);
+        myLog('📊 未投递岗位数：', targetNum, '；略过岗位数：', ignoreNum);
         myLog('❌ 执行出错', error);
 
         // BOSS安全检测随时可能触发，每一次检测都会耗时，改为报错后检测是否此原因导致的
@@ -104,7 +107,7 @@ async function start(conf = {}) {
 }
 async function main(pageNum = 1) {
     myLog(
-        `页数：${pageNum}；剩余目标：${targetNum}；自定义薪资范围：${
+        `页码：${pageNum}；剩余目标：${targetNum}；自定义薪资范围：${
             salaryRange[1] === Infinity ? '不限。' : ''
         }[${salaryRange.join(', ')}]`
     );
@@ -115,7 +118,7 @@ async function main(pageNum = 1) {
     if (!onetimeStatus.initMarketPage) {
         let marketUrl = getNewMarketUrl(pageNum); // 出现验证页，说明 puppeteer 被检测了(403)
         await marketPage.goto(marketUrl, {
-            waitUntil: 'networkidle2', // 与 waitForTimeout 冲突貌似只能存在一个
+            waitUntil: 'networkidle2', // 与 waitForTimeout 冲突，貌似只能存在一个
             // timeout: 60000,
         });
 
@@ -193,11 +196,6 @@ async function onetimeCheck() {
         });
     }
 }
-function resetOnetimeStatus() {
-    Object.keys(onetimeStatus).forEach(key => {
-        onetimeStatus[key] = false;
-    });
-}
 
 async function autoSayHello(marketPage) {
     await marketPage.waitForSelector('li.job-card-wrapper').catch(e => {
@@ -211,12 +209,11 @@ async function autoSayHello(marketPage) {
     let notPostJobs = await asyncFilter(jobCards, async (node, index) => {
         let companyName = (await node.$eval('.company-name', node => node.innerText)).toLowerCase();
         let jobName = (await node.$eval('.job-name', node => node.innerText)).toLowerCase();
-        let fullName = `${jobName}（${companyName}）`;
-        
+        let fullName = `《${companyName}》 ${jobName}`;
         // 选择未沟通的岗位
         let notCommunicate = (await node.$eval('a.start-chat-btn', node => node.innerText)) !== '继续沟通';
         if (!notCommunicate) {
-            myLog(`🎃 略过${fullName}：曾沟通`);
+            myLog(`🎃 略过 ${fullName}：曾沟通`);
             return false;
         }
 
@@ -235,7 +232,6 @@ async function autoSayHello(marketPage) {
         }
 
         // 筛选岗位最近更新时间 - lastModifyTime 被官方去掉了
-        // console.log('index', index, currJobList[index], currJobList[index].lastModifyTime);
         // let diff = daysBetween(currJobList[index].lastModifyTime);
         // let availDayDistance = jobUpdateTime >= diff;
         // if (!availDayDistance) {
@@ -258,14 +254,16 @@ async function autoSayHello(marketPage) {
         }
 
         Object.assign(node, {
-            _oriSalaryMin: oriSalaryMin,
-            _oriSalaryMax: oriSalaryMax,
-            _jobName: jobName,
-            _companyName: companyName,
+            data: {
+                oriSalaryMin,
+                oriSalaryMax,
+                jobName,
+                companyName,
+            },
         });
         return true;
     });
-    myLog('初筛岗位数量：', notPostJobs?.length);
+    // myLog('初筛岗位数量：', notPostJobs?.length);
 
     while (notPostJobs.length && targetNum > 0) {
         let node = notPostJobs.shift();
@@ -275,52 +273,58 @@ async function autoSayHello(marketPage) {
 // sendHello 跳转到岗位详情页。至少有 3s 等待
 async function sendHello(node, marketPage) {
     await marketPage.evaluate(node => node.click(), node); // 点击节点，打开公司详情页
-    await sleep(openNewTabTime); // 远程浏览器。此处连接或新开页面，时间都会变动。等待新页面
+    await sleep(openNewTabTime); // 等待新页面加载。远程浏览器需要更多时间，此处连接或新开页面，时间都会变动。
 
     // 一般只会有一个详情页。打开一页，执行一个任务，然后关闭页面
-    let [detailPage] = (await browser.pages()).filter(page =>
+    const [detailPage] = (await browser.pages()).filter(page =>
         page.url().startsWith('https://www.zhipin.com/job_detail')
     );
-    detailPage.setDefaultTimeout(timeout);
+    detailPage?.setDefaultTimeout?.(timeout);
+    const detailPageUrl = detailPage?.url?.();
 
-    let {
-        _oriSalaryMin: oriSalaryMin,
-        _oriSalaryMax: oriSalaryMax,
-        _companyName: companyName,
-        _jobName: jobName,
-    } = node;
+    let { oriSalaryMin = 0, oriSalaryMax = 0, companyName = '', jobName = '' } = node.data;
+    const fullName = `《${companyName}》 ${jobName}`;
 
     let communityBtn = await detailPage.waitForSelector('.btn.btn-startchat').catch(e => {
         myLog(`${timeout / 1000}s 内未获取到详情页沟通按钮`);
         throw new Error(e);
     });
     let communityBtnInnerText = await detailPage.evaluate(communityBtn => communityBtn.innerText, communityBtn);
+    // todo 沟通列表偶尔会缺少待打开的岗位，目前仅 window 出现。等待 add.json 接口。岗位详情页点击打开的链接不对，没有携带 id 等参数
+    // console.log(
+    //     '🔎 ~ sendHello ~ communityBtnInnerText data-url:',
+    //     !(await detailPage.evaluate(communityBtn => communityBtn.getAttribute('data-url'), communityBtn)) && true
+    // );
+
     if (communityBtnInnerText.includes('继续沟通')) {
-        myLog(`🎃 略过 ${companyName} ${jobName}，曾沟通`);
+        myLog(`🎃 略过 ${fullName}，曾沟通`);
         return await detailPage.close();
     }
 
     let jobDetail = (await detailPage.$eval('.job-sec-text', node => node.innerText))?.toLowerCase();
+    let foundExcludeSkill = excludeJobs.find(word => jobDetail.includes(word));
+    if (foundExcludeSkill) {
+        myLog(`🎃 略过 ${fullName}，工作内容包含屏蔽词：${foundExcludeSkill}。\n🛜 复查链接：${detailPageUrl}`);
+        return await detailPage.close();
+    }
     let notFoundSkill = keySkills.find(skill => !jobDetail.includes(skill));
     if (keySkills.length && notFoundSkill) {
-        myLog(`🎃 略过：${companyName} ${jobName}，工作内容不包含关键技能；${notFoundSkill}`);
+        myLog(`🎃 略过 ${fullName}，工作内容不包含关键技能：${notFoundSkill}。\n🛜 复查链接：${detailPageUrl}`);
         return await detailPage.close();
     }
 
-    // await sleep(500); // todo 沟通列表偶尔异常，可能是有些数据没有准备好？
+    await sleep(1000); // todo 沟通列表偶尔会缺少待打开的岗位，仅 window 出现。
 
-    communityBtn.click(); // 点击后，(1)出现小窗 （2）详情页被替换为沟通列表页
-
-    // await sleep(500); //
+    communityBtn.click(); // 点击后，(1)出现小窗 （2）详情页被替换为沟通列表页。
 
     let availableTextarea;
     if (!textareaSelector) {
         availableTextarea = await initTextareaSelector(detailPage, true);
     } else {
         availableTextarea = await detailPage.waitForSelector(textareaSelector).catch(e => {
-            throw new Error(`使用 ${textareaSelector}，${timeout / 1000}s 内未获取输入框`);
+            throw new Error(`尝试投递 ${fullName}。使用 ${textareaSelector}，${timeout / 1000}s 内未获取输入框`); // todo
         });
-        if (!availableTextarea) throw new Error('没有可用的输入框');
+        if (!availableTextarea) throw new Error('没有可用的输入框，点击“启动任务”重试');
     }
     await availableTextarea.type(helloTxt);
     // 2. 点击发送按钮
@@ -330,7 +334,7 @@ async function sendHello(node, marketPage) {
     targetNum--;
 
     // 已投递的公司名
-    myLog(`✅ ${companyName} ${jobName} [${oriSalaryMin}-${oriSalaryMax}K]`);
+    myLog(`✅ ${fullName} [${oriSalaryMin}-${oriSalaryMax}K]`);
 
     return await detailPage.close();
 }
@@ -371,6 +375,7 @@ async function asyncFilter(list = [], fn) {
     return list.filter((_v, index) => results[index]);
 }
 function myLog(...args) {
+    ignoreNum++;
     logs.push(`${args.join(' ')}`);
 }
 // 处理 '18-35K·14薪' -> [18, 35]
@@ -379,6 +384,18 @@ function handleSalary(str) {
     let [minStr, maxStr] = str.match(reg);
     return [+minStr, +maxStr];
 }
+function resetOnetimeStatus() {
+    Object.keys(onetimeStatus).forEach(key => {
+        onetimeStatus[key] = false;
+    });
+    ignoreNum = 0;
+}
+function sleep(time = 1000) {
+    return new Promise((resolve, reject) => {
+        setTimeout(resolve, time);
+    });
+}
+
 function getCurrDate() {
     let stamp = new Date();
     let year = stamp.getFullYear();
@@ -409,11 +426,6 @@ function promiseQueue(list) {
 function daysBetween(start = Data.now(), end = Date.now()) {
     const msPerDay = 24 * 60 * 60 * 1000; // 每天的毫秒数
     return Math.round((end - start) / msPerDay);
-}
-function sleep(time = 1000) {
-    return new Promise((resolve, reject) => {
-        setTimeout(resolve, time);
-    });
 }
 
 module.exports = { main: start, logs };
