@@ -8,7 +8,6 @@
  * 4. 遇到问题，以 headless=false 进行调试
  */
 
-// const fs = require('fs/promises');
 const puppeteer = require('puppeteer-extra');
 const stealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(stealthPlugin());
@@ -46,6 +45,7 @@ let cookies = [
 let targetNum;
 let timeout = 3000;
 let salaryRange = [0, Infinity];
+let bossActiveType = 0;
 let keySkills = [];
 // let jobUpdateTime = 0;
 let excludeCompanies = [];
@@ -63,8 +63,8 @@ async function start(conf = {}) {
         targetNum = 2,
         timeout = 3000,
         salaryRange = [0, Infinity],
+        bossActiveType = 0,
         keySkills = [],
-        // jobUpdateTime = 365,
         excludeCompanies = [],
         excludeJobs = [],
         headless = 'new',
@@ -154,49 +154,6 @@ async function main(pageNum = 1) {
         await main(queryParams.page);
     }
 }
-/** 启动浏览器，写入 cookie */
-async function initBrowserAndSetCookie() {
-    const BROWERLESS = process.env.BROWERLESS;
-    if (BROWERLESS) {
-        myLog(`使用远程浏览器启动服务，“观察打招呼过程”无效，超时时间建议 16s 以上`);
-
-        browser = await puppeteer.connect({
-            browserWSEndpoint: BROWERLESS,
-        });
-        openNewTabTime = 3000;
-    } else {
-        browser = await puppeteer.launch({
-            headless, // 是否以浏览器视图调试
-            devtools: false,
-            defaultViewport: null, // null 则页面和窗口大小一致
-        });
-    }
-
-    marketPage = await getNewPage();
-
-    await marketPage.setDefaultTimeout(timeout);
-    await marketPage.setCookie(...cookies);
-}
-// 检查是否登录、关闭安全问题
-async function onetimeCheck() {
-    if (!onetimeStatus.checkLogin) {
-        const headerLoginBtn = await marketPage.waitForSelector('.header-login-btn').catch(e => {
-            onetimeStatus.checkLogin = true;
-            myLog('登录态有效');
-        });
-        if (headerLoginBtn) {
-            throw new Error('登录态过期，请重新获取 cookie');
-        }
-    }
-    if (!onetimeStatus.checkSafeQues) {
-        // 关闭安全问题弹窗
-        await marketPage.click('.dialog-account-safe > div.dialog-container > div.dialog-title > a').catch(e => {
-            myLog('未检测到安全问题弹窗');
-            onetimeStatus.checkSafeQues = true;
-        });
-    }
-}
-
 async function autoSayHello(marketPage) {
     await marketPage.waitForSelector('li.job-card-wrapper').catch(e => {
         throw new Error(`${timeout / 1000}s 内未获取岗位列表`);
@@ -263,14 +220,13 @@ async function autoSayHello(marketPage) {
         });
         return true;
     });
-    // myLog('初筛岗位数量：', notPostJobs?.length);
 
     while (notPostJobs.length && targetNum > 0) {
         let node = notPostJobs.shift();
         await sendHello(node, marketPage);
     }
 }
-// sendHello 跳转到岗位详情页。至少有 3s 等待
+// 跳转到岗位详情页。至少有 3s 等待
 async function sendHello(node, marketPage) {
     await marketPage.evaluate(node => node.click(), node); // 点击节点，打开公司详情页
     await sleep(openNewTabTime); // 等待新页面加载。远程浏览器需要更多时间，此处连接或新开页面，时间都会变动。
@@ -290,7 +246,7 @@ async function sendHello(node, marketPage) {
         throw new Error(e);
     });
     let communityBtnInnerText = await detailPage.evaluate(communityBtn => communityBtn.innerText, communityBtn);
-    // todo 沟通列表偶尔会缺少待打开的岗位，目前仅 window 出现。等待 add.json 接口。岗位详情页点击打开的链接不对，没有携带 id 等参数
+    //  todo 沟通列表偶尔会缺少待沟通的岗位，目前仅 window 出现。等待 add.json 接口。岗位详情页点击打开的链接不对，没有携带 id 等参数
     // console.log(
     //     '🔎 ~ sendHello ~ communityBtnInnerText data-url:',
     //     !(await detailPage.evaluate(communityBtn => communityBtn.getAttribute('data-url'), communityBtn)) && true
@@ -298,6 +254,26 @@ async function sendHello(node, marketPage) {
 
     if (communityBtnInnerText.includes('继续沟通')) {
         myLog(`🎃 略过 ${fullName}，曾沟通`);
+        return await detailPage.close();
+    }
+
+    let [bossOnlineTxt, bossOfflineTxt] = await Promise.all([
+        detailPage
+            .$eval('.boss-online-tag', node => node.innerText)
+            .catch(e => {
+                myLog(`${timeout / 1000}s 内未获取到BOSS在线状态`);
+            }),
+        detailPage
+            .$eval('.boss-active-time', node => node.innerText)
+            .catch(e => {
+                myLog(`${timeout / 1000}s 内未获取到BOSS离线状态`);
+            }),
+    ]);
+    let bossActiveTime = bossOnlineTxt || bossOfflineTxt;
+
+    // todo
+    if (bossActiveTime && bossActiveType !== '无限制' && !checkBossActiveTime(bossActiveType, bossActiveTime)) {
+        myLog(`🎃 略过 ${fullName}，BOSS活跃时间不匹配：${bossActiveTime}`);
         return await detailPage.close();
     }
 
@@ -313,7 +289,7 @@ async function sendHello(node, marketPage) {
         return await detailPage.close();
     }
 
-    await sleep(1000); // todo 沟通列表偶尔会缺少待打开的岗位，仅 window 出现。
+    await sleep(1000); // 沟通列表偶尔会缺少待沟通的岗位，仅 window 出现
 
     communityBtn.click(); // 点击后，(1)出现小窗 （2）详情页被替换为沟通列表页。
 
@@ -322,7 +298,7 @@ async function sendHello(node, marketPage) {
         availableTextarea = await initTextareaSelector(detailPage, true);
     } else {
         availableTextarea = await detailPage.waitForSelector(textareaSelector).catch(e => {
-            throw new Error(`尝试投递 ${fullName}。使用 ${textareaSelector}，${timeout / 1000}s 内未获取输入框`); // todo
+            throw new Error(`尝试投递 ${fullName}。使用 ${textareaSelector}，${timeout / 1000}s 内未获取输入框`);
         });
         if (!availableTextarea) throw new Error('没有可用的输入框，点击“启动任务”重试');
     }
@@ -337,17 +313,6 @@ async function sendHello(node, marketPage) {
     myLog(`✅ ${fullName} [${oriSalaryMin}-${oriSalaryMax}K]`);
 
     return await detailPage.close();
-}
-
-async function getNewPage() {
-    const page = await browser.newPage();
-    return page;
-}
-function getNewMarketUrl(pageNum) {
-    if (pageNum) queryParams.page = pageNum;
-    return `https://www.zhipin.com/web/geek/job?${Object.keys(queryParams)
-        .map(key => `${key}=${encodeURIComponent(queryParams[key])}`)
-        .join('&')}`;
 }
 // 获取输入框选择器，需经过 setDefaultTimeout 耗时（自定义为 3s）
 async function initTextareaSelector(page, returnNode = false) {
@@ -368,6 +333,93 @@ async function initTextareaSelector(page, returnNode = false) {
     if (selector) textareaSelector = selector;
 
     if (returnNode) return originModalTextarea || jumpListTextarea;
+}
+
+async function getNewPage() {
+    const page = await browser.newPage();
+    return page;
+}
+function getNewMarketUrl(pageNum) {
+    if (pageNum) queryParams.page = pageNum;
+    return `https://www.zhipin.com/web/geek/job?${Object.keys(queryParams)
+        .map(key => `${key}=${encodeURIComponent(queryParams[key])}`)
+        .join('&')}`;
+}
+/** 启动浏览器，写入 cookie */
+async function initBrowserAndSetCookie() {
+    const BROWERLESS = process.env.BROWERLESS;
+    if (BROWERLESS) {
+        myLog(`使用远程浏览器启动服务，“观察打招呼过程”无效，超时时间建议 16s 以上`);
+
+        browser = await puppeteer.connect({
+            browserWSEndpoint: BROWERLESS,
+        });
+        openNewTabTime = 3000;
+    } else {
+        browser = await puppeteer.launch({
+            headless, // 是否以浏览器视图调试
+            devtools: false,
+            defaultViewport: null, // null 则页面和窗口大小一致
+        });
+    }
+
+    marketPage = await getNewPage();
+
+    await marketPage.setDefaultTimeout(timeout);
+    await marketPage.setCookie(...cookies);
+}
+// 检查是否登录、关闭安全问题
+async function onetimeCheck() {
+    if (!onetimeStatus.checkLogin) {
+        const headerLoginBtn = await marketPage.waitForSelector('.header-login-btn').catch(e => {
+            onetimeStatus.checkLogin = true;
+            myLog('登录态有效');
+        });
+        if (headerLoginBtn) {
+            throw new Error('登录态过期，请重新获取 cookie');
+        }
+    }
+    if (!onetimeStatus.checkSafeQues) {
+        // 关闭安全问题弹窗
+        await marketPage.click('.dialog-account-safe > div.dialog-container > div.dialog-title > a').catch(e => {
+            myLog('未检测到安全问题弹窗');
+            onetimeStatus.checkSafeQues = true;
+        });
+    }
+}
+function checkBossActiveTime(bossActiveType, txt) {
+    if (txt === '在线') return true;
+
+    let result = false;
+    let prefix = txt.slice(0, txt.indexOf('活跃'));
+
+    switch (bossActiveType) {
+        case '半年内活跃': {
+            if (['4月内', '5月内', '近半年', '半年内'].includes(prefix)) {
+                result = true;
+            }
+        }
+        case '3个月内活跃': {
+            if (['2月内', '3月内'].includes(prefix)) {
+                result = true;
+            }
+        }
+        case '1个月内活跃': {
+            if (['刚刚', '今日', '3日内', '本周', '2周内', '本月'].includes(prefix)) {
+                result = true;
+            }
+        }
+    }
+
+    if (
+        !['4月内', '5月内', '近半年', '半年内', '2月内', '3月内', '刚刚', '今日', '3日内', '本周', '本月'].includes(
+            prefix
+        )
+    ) {
+        myLog('❓ 额外活跃时间词：' + txt);
+    }
+
+    return result;
 }
 
 async function asyncFilter(list = [], fn) {
@@ -394,38 +446,6 @@ function sleep(time = 1000) {
     return new Promise((resolve, reject) => {
         setTimeout(resolve, time);
     });
-}
-
-function getCurrDate() {
-    let stamp = new Date();
-    let year = stamp.getFullYear();
-    let month = ('0' + (stamp.getMonth() + 1)).slice(-2);
-    let date = ('0' + stamp.getDate()).slice(-2);
-    let hours = ('0' + stamp.getHours()).slice(-2);
-    let mins = ('0' + stamp.getMinutes()).slice(-2);
-    let seconds = ('0' + stamp.getSeconds()).slice(-2);
-    return `${year}年${month}月${date}日 ${hours}时${mins}分${seconds}秒`;
-}
-function isError(res) {
-    if (res.stack && res.message) {
-        return true;
-    }
-    return false;
-}
-function promiseQueue(list) {
-    let result = [];
-    return list
-        .reduce((accu, curr) => {
-            return accu.then(curr).then(data => {
-                result.push(data);
-                return result;
-            });
-        }, Promise.resolve())
-        .catch(err => `promiseQueue err: ${err}`);
-}
-function daysBetween(start = Data.now(), end = Date.now()) {
-    const msPerDay = 24 * 60 * 60 * 1000; // 每天的毫秒数
-    return Math.round((end - start) / msPerDay);
 }
 
 module.exports = { main: start, logs };
