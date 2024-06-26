@@ -384,7 +384,22 @@ async function checkBossActiveStatus(type, txt = '') {
     let result = false;
     let prefix = txt.slice(0, txt.indexOf('活跃'));
 
-    if (!['4月内', '5月内', '近半年', '2月内', '3月内', '刚刚', '今日', '3日内', '本周', '本月'].includes(prefix)) {
+    if (
+        ![
+            '半年前',
+            '4月内',
+            '5月内',
+            '近半年',
+            '2月内',
+            '3月内',
+            '刚刚',
+            '今日',
+            '3日内',
+            '本周',
+            '2周内',
+            '本月',
+        ].includes(prefix)
+    ) {
         myLog(`额外BOSS状态：${txt}`);
     }
 
