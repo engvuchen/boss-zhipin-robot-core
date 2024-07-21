@@ -87,16 +87,17 @@ async function start(conf = {}) {
     } catch (error) {
         myLog('当前页码', queryParams.page);
         myLog('📊 未投递岗位数：', targetNum, '；略过岗位数：', ignoreNum);
-        myLog('❌ 执行出错', error);
 
-        // BOSS安全检测随时可能触发，每一次检测都会耗时，改为报错后检测是否此原因导致的
+        // 报错后检测是否为 Boss 安全检测
         let validateButton = await marketPage
             .waitForSelector('#wrap > div > div.error-content > div > button[ka="validate_button_click"]')
             .catch(e => {
                 myLog(`${timeout / 1000}s 内未获取到验证问题按钮`);
             });
         if (validateButton) {
-            myLog('检测到 Boss 安全校验。请先在 boss 网页上完成验证后重试');
+            myLog('❌ 执行出错：检测到 Boss 安全校验。请先在 Boss 网页上完成验证后重试');
+        } else {
+            myLog('❌ 执行出错', error);
         }
     }
 
@@ -126,7 +127,7 @@ async function main(pageNum = 1) {
         onetimeStatus.initMarketPage = true;
         myLog('打开岗位页面成功');
     } else {
-        myLog('通过页码组件翻页');
+        // myLog('通过页码组件翻页');
         // 点击页码；偶尔出现 BOSS 等待（网页久久不动，会触发资源更新）；最多显示 10 页（一页 30 个岗位）
         await marketPage.waitForSelector('.options-pages > a');
         let pageNumList = Array.from(await marketPage.$$('.options-pages > a')).slice(1, -1); // 页码开头、结尾是导航箭头，不需要
@@ -138,12 +139,13 @@ async function main(pageNum = 1) {
         );
         let foundIndex = numList.findIndex(num => num === pageNum);
         if (foundIndex === -1) {
-            if (pageNum <= 10) {
-                throw new Error(`页码不匹配，当前页码：${numList.join(',')}`);
+            if (pageNum > numList.at(-1)) {
+                throw new Error(`超过最大页码${numList.at(-1)}`);
             } else {
-                throw new Error(`BOSS 最多返回10页查询结果`);
+                throw new Error(`页码不匹配，当前页码：${numList.join(',')}`);
             }
         }
+
         await marketPage.evaluate(node => node.click(), pageNumList[foundIndex]);
     }
 
@@ -159,9 +161,7 @@ async function autoSayHello(marketPage) {
         throw new Error(`${timeout / 1000}s 内未获取岗位列表`);
     });
     let jobCards = Array.from(await marketPage.$$('li.job-card-wrapper'));
-    if (!jobCards?.length) {
-        throw new Error('岗位列表为空');
-    }
+    if (!jobCards?.length) throw new Error('岗位列表为空');
 
     let notPostJobs = await asyncFilter(jobCards, async (node, index) => {
         let companyName = (await node.$eval('.company-name', node => node.innerText)).toLowerCase();
@@ -187,14 +187,6 @@ async function autoSayHello(marketPage) {
             myLog(`🎃 略过${fullName}，包含屏蔽工作关键词（${excludeJobName}）`);
             return false;
         }
-
-        // 筛选岗位最近更新时间 - lastModifyTime 被官方去掉了
-        // let diff = daysBetween(currJobList[index].lastModifyTime);
-        // let availDayDistance = jobUpdateTime >= diff;
-        // if (!availDayDistance) {
-        //     myLog(`🎃 略过 ${companyName} ${jobName}，距离 ${diff} 天更新，不满足 ${jobUpdateTime} 天内更新过`);
-        //     return false;
-        // }
 
         // 筛选薪资
         let [oriSalaryMin, oriSalaryMax] = handleSalary(await node.$eval('.salary', node => node.innerText));
@@ -234,22 +226,20 @@ async function sendHello(node, marketPage) {
     const [detailPage] = (await browser.pages()).filter(page =>
         page.url().startsWith('https://www.zhipin.com/job_detail')
     );
-    detailPage?.setDefaultTimeout?.(timeout); // 启动观察就没有这个问题了
+    detailPage?.setDefaultTimeout?.(timeout);
     const detailPageUrl = detailPage?.url?.();
 
     let { oriSalaryMin = 0, oriSalaryMax = 0, companyName = '', jobName = '' } = node.data;
     const fullName = `《${companyName}》 ${jobName}`;
 
     if (bossActiveType && bossActiveType !== '无限制') {
-        // 出错依然执行，但出错仍然被捕获了
         let resList = await Promise.allSettled([
             detailPage.$eval('.boss-active-time', node => node.innerText),
             detailPage.$eval('.boss-online-tag', node => node.innerText),
         ]);
-
         let res = resList.find(curr => curr.status === 'fulfilled');
         if (!res || !(await checkBossActiveStatus(bossActiveType, res.value))) {
-            myLog(`🎃 略过${fullName}，BOSS 活跃时间不符：${res?.value || '活跃时间不存在'}`);
+            myLog(`🎃 略过${fullName}，Boss 活跃时间不符：${res?.value || '活跃时间不存在'}`);
             return await detailPage.close();
         }
     }
@@ -259,7 +249,7 @@ async function sendHello(node, marketPage) {
         throw new Error(e);
     });
     let communityBtnInnerText = await detailPage.evaluate(communityBtn => communityBtn.innerText, communityBtn);
-    // todo 沟通列表偶尔会缺少待打开的岗位，目前仅 window 出现。等待 add.json 接口。岗位详情页点击打开的链接不对，没有携带 id 等参数
+    // 沟通列表偶尔会缺少待打开的岗位，目前仅 window 出现。等待 add.json 接口。岗位详情页点击打开的链接不对，没有携带 id 等参数
     // console.log('🔎 ~ sendHello ~ communityBtnInnerText data-url:', !(await detailPage.evaluate(communityBtn => communityBtn.getAttribute('data-url'), communityBtn)) && true);
 
     if (communityBtnInnerText.includes('继续沟通')) {
@@ -279,19 +269,24 @@ async function sendHello(node, marketPage) {
         return await detailPage.close();
     }
 
-    await sleep(1000); // todo 沟通列表偶尔会缺少待打开的岗位，仅 window 出现。
+    await sleep(1000); // 等1s；沟通列表偶尔会缺少待打开的岗位，仅 window 出现。
+    communityBtn.click(); // 点击后，(1)出现小窗 （2）详情页被替换为沟通列表页
 
-    communityBtn.click(); // 点击后，(1)出现小窗 （2）详情页被替换为沟通列表页。
+    let availableTextarea = !textareaSelector
+        ? await initTextareaSelector(detailPage)
+        : await detailPage.waitForSelector(textareaSelector).catch(e => {
+              throw new Error(`尝试投递 ${fullName}。使用 ${textareaSelector}，${timeout / 1000}s 内未获取输入框`);
+          });
 
-    let availableTextarea;
-    if (!textareaSelector) {
-        availableTextarea = await initTextareaSelector(detailPage, true);
-    } else {
-        availableTextarea = await detailPage.waitForSelector(textareaSelector).catch(e => {
-            throw new Error(`尝试投递 ${fullName}。使用 ${textareaSelector}，${timeout / 1000}s 内未获取输入框`); // todo
+    if (!availableTextarea) {
+        let reachLimit = await detailPage.waitForSelector('div.dialog-title > .title').catch(e => {
+            myLog(`${timeout / 1000}s 内未获取到沟通上限提示`);
         });
-        if (!availableTextarea) throw new Error('没有可用的输入框，点击“启动任务”重试');
+        if (reachLimit) throw new Error('抵达 Boss 每日沟通上限');
+
+        throw new Error('没有可用的输入框，点击“启动任务”重试');
     }
+
     await availableTextarea.type(helloTxt);
     // 2. 点击发送按钮
     await detailPage.click('div.send-message').catch(e => e); // 弹窗按钮
@@ -345,9 +340,7 @@ async function onetimeCheck() {
             onetimeStatus.checkLogin = true;
             myLog('登录态有效');
         });
-        if (headerLoginBtn) {
-            throw new Error('登录态过期，请重新获取 cookie');
-        }
+        if (headerLoginBtn) throw new Error('登录态过期，请重新获取 cookie');
     }
     if (!onetimeStatus.checkSafeQues) {
         // 关闭安全问题弹窗
@@ -357,25 +350,25 @@ async function onetimeCheck() {
         });
     }
 }
-// 获取输入框选择器，需经过 setDefaultTimeout 耗时（自定义为 3s）
-async function initTextareaSelector(page, returnNode = false) {
+// 获取输入框选择器，需经过 setDefaultTimeout 耗时（自定义为 3s）。且返回选取节点
+async function initTextareaSelector(page) {
     let originModalTextareaSelector = 'div.edit-area > textarea';
     let jumpListTextareaSelector = 'div.chat-conversation > div.message-controls > div > div.chat-input';
 
-    // 小窗输入
-    const originModalTextarea = await page.waitForSelector(originModalTextareaSelector).catch(e => {
-        myLog(`${timeout / 1000}s 内未获取到小窗输入框`);
-    });
-    // 沟通列表输入
-    const jumpListTextarea = await page.waitForSelector(jumpListTextareaSelector).catch(e => {
-        myLog(`${timeout / 1000}s 内未获取到沟通列表输入框`);
-    });
+    let [originModalTextarea, jumpListTextarea] = await Promise.all([
+        page.waitForSelector(originModalTextareaSelector).catch(e => {
+            myLog(`${timeout / 1000}s 内未获取到小窗输入框`);
+        }),
+        page.waitForSelector(jumpListTextareaSelector).catch(e => {
+            myLog(`${timeout / 1000}s 内未获取到沟通列表输入框`);
+        }),
+    ]);
 
     const selector =
         (originModalTextarea && originModalTextareaSelector) || (jumpListTextarea && jumpListTextareaSelector);
     if (selector) textareaSelector = selector;
 
-    if (returnNode) return originModalTextarea || jumpListTextarea;
+    return originModalTextarea || jumpListTextarea;
 }
 async function checkBossActiveStatus(type, txt = '') {
     if (!txt) return false;
@@ -383,25 +376,6 @@ async function checkBossActiveStatus(type, txt = '') {
 
     let result = false;
     let prefix = txt.slice(0, txt.indexOf('活跃'));
-
-    if (
-        ![
-            '半年前',
-            '4月内',
-            '5月内',
-            '近半年',
-            '2月内',
-            '3月内',
-            '刚刚',
-            '今日',
-            '3日内',
-            '本周',
-            '2周内',
-            '本月',
-        ].includes(prefix)
-    ) {
-        myLog(`额外BOSS状态：${txt}`);
-    }
 
     switch (type) {
         case '半年内活跃': {
