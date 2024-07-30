@@ -1,6 +1,6 @@
 # boss-zhipin-robot-core
 
-《BOSS 直聘》半自动打招呼工具的核心逻辑（开发中）。
+《BOSS 直聘》半自动打招呼工具的核心逻辑。
 
 最近一次 node.js 依赖：`v18.16.0`；
 

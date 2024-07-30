@@ -8,24 +8,23 @@
  * 4. 遇到问题，以 headless=false 进行调试
  */
 
-// const fs = require('fs/promises');
 const puppeteer = require('puppeteer-extra');
 const stealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(stealthPlugin());
 
 let browser;
 let marketPage;
-
 let logs = [];
 let ignoreNum = 0;
+let pageNum = 1;
+
 let onetimeStatus = {
-    initMarketPage: false,
-    checkSafeQues: false,
-    checkLogin: false,
+    init: false,
+    maxPageNum: 10,
 };
 let textareaSelector = '';
-let queryParams = {}; // { page, query, experience, salary }, 只用到 page
 
+let queryParams = {}; // { page, query, experience, salary }, 只用到 page
 let helloTxt = '';
 let cookies = [
     {
@@ -71,6 +70,8 @@ async function start(conf = {}) {
     } = conf);
 
     cookies[0].value = wt2Cookie;
+    pageNum = queryParams.page || 1;
+    ignoreNum = 0;
 
     [keySkills, excludeCompanies, excludeJobs] = [keySkills, excludeCompanies, excludeJobs].map(list =>
         list.map(item => item.toLowerCase())
@@ -81,11 +82,11 @@ async function start(conf = {}) {
     try {
         myLog(`⏳ 自动打招呼进行中, 本次目标: ${targetNum}; 请耐心等待`);
 
-        await main(queryParams.page);
+        await main();
 
         myLog('✨ 任务顺利完成！');
     } catch (error) {
-        myLog('当前页码', queryParams.page);
+        myLog('当前页码', pageNum);
         myLog('📊 未投递岗位数：', targetNum, '；略过岗位数：', ignoreNum);
 
         // 报错后检测是否为 Boss 安全检测
@@ -102,59 +103,30 @@ async function start(conf = {}) {
     }
 
     await browser?.close()?.catch(e => myLog('关闭无头浏览器出错', e));
-
     browser = null;
     marketPage = null;
 }
-async function main(pageNum = 1) {
+async function main() {
     myLog(
         `页码：${pageNum}；剩余目标：${targetNum}；自定义薪资范围：${
             salaryRange[1] === Infinity ? '不限。' : ''
         }[${salaryRange.join(', ')}]`
     );
+    await init();
 
-    if (!browser) await initBrowserAndSetCookie();
+    if (pageNum > onetimeStatus.maxPageNum) throw new Error(`page 参数错误，超过最大页码${maxPageNum}`);
 
-    // 打开新页面或通过页码组件进行翻页
-    if (!onetimeStatus.initMarketPage) {
-        let marketUrl = getNewMarketUrl(pageNum); // 出现验证页，说明 puppeteer 被检测了(403)
-        await marketPage.goto(marketUrl, {
-            waitUntil: 'networkidle2', // 与 waitForTimeout 冲突，貌似只能存在一个
-            // timeout: 60000,
-        });
-
-        await onetimeCheck();
-        onetimeStatus.initMarketPage = true;
-        myLog('打开岗位页面成功');
-    } else {
-        // myLog('通过页码组件翻页');
-        // 点击页码；偶尔出现 BOSS 等待（网页久久不动，会触发资源更新）；最多显示 10 页（一页 30 个岗位）
-        await marketPage.waitForSelector('.options-pages > a');
-        let pageNumList = Array.from(await marketPage.$$('.options-pages > a')).slice(1, -1); // 页码开头、结尾是导航箭头，不需要
-        let numList = await Promise.all(
-            pageNumList.map(async node => {
-                let txt = await marketPage.evaluate(node => node.innerText, node);
-                return Number(txt) || '...';
-            })
-        );
-        let foundIndex = numList.findIndex(num => num === pageNum);
-        if (foundIndex === -1) {
-            if (pageNum > numList.at(-1)) {
-                throw new Error(`超过最大页码${numList.at(-1)}`);
-            } else {
-                throw new Error(`页码不匹配，当前页码：${numList.join(',')}`);
-            }
-        }
-
-        await marketPage.evaluate(node => node.click(), pageNumList[foundIndex]);
-    }
-
+    // 执行 -> 检测 -> 通过则翻页
     await autoSayHello(marketPage);
-
-    if (targetNum > 0) {
-        queryParams.page = pageNum + 1;
-        await main(queryParams.page);
+    // 尝试点击右翻页按钮。实践中发现最多显示 10 页（一页 30 个岗位）
+    let nextPageBtn = await marketPage.waitForSelector('.ui-icon-arrow-right');
+    if ((await marketPage.evaluate(node => node?.parentElement?.className, nextPageBtn)) === 'disabled') {
+        throw new Error(`已遍历所有岗位，但目标未完成`);
     }
+    ++pageNum;
+    await marketPage.evaluate(node => node.click(), nextPageBtn);
+
+    if (targetNum > 0) await main();
 }
 async function autoSayHello(marketPage) {
     await marketPage.waitForSelector('li.job-card-wrapper').catch(e => {
@@ -299,16 +271,40 @@ async function sendHello(node, marketPage) {
 
     return await detailPage.close();
 }
+/**
+ * 尝试初始化浏览器、cookie
+ * 打开岗位页
+ * 检查登录态是否有效
+ * 关闭安全问题
+ * 初始化最大页码
+ */
+async function init() {
+    if (!browser) await initBrowserAndSetCookie();
 
-async function getNewPage() {
-    const page = await browser.newPage();
-    return page;
-}
-function getNewMarketUrl(pageNum) {
-    if (pageNum) queryParams.page = pageNum;
-    return `https://www.zhipin.com/web/geek/job?${Object.keys(queryParams)
-        .map(key => `${key}=${encodeURIComponent(queryParams[key])}`)
-        .join('&')}`;
+    // 每次页面点击，重新进行初始化
+    if (!onetimeStatus.init) {
+        onetimeStatus.init = true;
+
+        // 打开岗位页
+        await marketPage.goto(getMarketUrl(), {
+            waitUntil: 'networkidle2',
+        });
+        // 登录态是否有效
+        const headerLoginBtn = await marketPage.waitForSelector('.header-login-btn').catch(e => {
+            onetimeStatus.checkLogin = true;
+        });
+        if (headerLoginBtn) throw new Error('登录态过期，请重新获取 cookie');
+        // 关闭安全问题弹窗
+        await marketPage.click('.dialog-account-safe > div.dialog-container > div.dialog-title > a').catch(e => {
+            // myLog('未检测到安全问题弹窗');
+            onetimeStatus.checkSafeQues = true;
+        });
+        // 初始化最大页码
+        let lastNumNode = Array.from(await marketPage.$$('.options-pages > a'))
+            .slice(1, -1)
+            .pop();
+        onetimeStatus.maxPageNum = await marketPage.evaluate(node => node.innerText, lastNumNode);
+    }
 }
 /** 启动浏览器，写入 cookie */
 async function initBrowserAndSetCookie() {
@@ -329,26 +325,17 @@ async function initBrowserAndSetCookie() {
     }
 
     marketPage = await getNewPage();
-
     await marketPage.setDefaultTimeout(timeout);
     await marketPage.setCookie(...cookies);
 }
-// 检查是否登录、关闭安全问题
-async function onetimeCheck() {
-    if (!onetimeStatus.checkLogin) {
-        const headerLoginBtn = await marketPage.waitForSelector('.header-login-btn').catch(e => {
-            onetimeStatus.checkLogin = true;
-            myLog('登录态有效');
-        });
-        if (headerLoginBtn) throw new Error('登录态过期，请重新获取 cookie');
-    }
-    if (!onetimeStatus.checkSafeQues) {
-        // 关闭安全问题弹窗
-        await marketPage.click('.dialog-account-safe > div.dialog-container > div.dialog-title > a').catch(e => {
-            myLog('未检测到安全问题弹窗');
-            onetimeStatus.checkSafeQues = true;
-        });
-    }
+async function getNewPage() {
+    const page = await browser.newPage();
+    return page;
+}
+function getMarketUrl() {
+    return `https://www.zhipin.com/web/geek/job?${Object.keys(queryParams)
+        .map(key => `${key}=${encodeURIComponent(queryParams[key])}`)
+        .join('&')}`;
 }
 // 获取输入框选择器，需经过 setDefaultTimeout 耗时（自定义为 3s）。且返回选取节点
 async function initTextareaSelector(page) {
@@ -403,20 +390,31 @@ async function asyncFilter(list = [], fn) {
     return list.filter((_v, index) => results[index]);
 }
 function myLog(...args) {
-    ignoreNum++;
-    logs.push(`${args.join(' ')}`);
+    let str = args.join(' ');
+    if (str.includes('略过')) ignoreNum++;
+
+    logs.push(`${str}`);
 }
-// 处理 '18-35K·14薪' -> [18, 35]
+/**
+ * '18-35K·14薪' -> [18, 35]
+ * '500-1000元' -> [0.5, 1]
+ */
 function handleSalary(str) {
     let reg = /\d+/g;
-    let [minStr, maxStr] = str.match(reg);
-    return [+minStr, +maxStr];
+    let [minNum, maxNum] = str.match(reg).map(str => +str);
+
+    // 适配“元”
+    if (!str.includes('K')) {
+        minNum = parseFloat((minNum / 1000).toFixed(4));
+        maxNum = parseFloat((maxNum / 1000).toFixed(4));
+    }
+
+    return [minNum, maxNum];
 }
+/** 重置一次性状态 */
 function resetOnetimeStatus() {
-    Object.keys(onetimeStatus).forEach(key => {
-        onetimeStatus[key] = false;
-    });
-    ignoreNum = 0;
+    onetimeStatus.init = false;
+    onetimeStatus.maxPageNum = 10;
 }
 function sleep(time = 1000) {
     return new Promise((resolve, reject) => {
