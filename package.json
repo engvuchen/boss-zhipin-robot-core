@@ -1,6 +1,6 @@
 {
   "name": "boss-zhipin-robot-core",
-  "version": "0.0.16",
+  "version": "0.0.17",
   "description": "",
   "dependencies": {
     "puppeteer": "^20.9.0",
