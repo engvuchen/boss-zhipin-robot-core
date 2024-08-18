@@ -8,9 +8,9 @@
  * 4. 遇到问题，以 headless=false 进行调试
  */
 
-const puppeteer = require('puppeteer-extra');
-const stealthPlugin = require('puppeteer-extra-plugin-stealth');
-puppeteer.use(stealthPlugin());
+const puppeteer = require('./puppeteer');
+const locateChrome = require('locate-chrome');
+const { sleep, handleSalary, getDataFormJobUrl, addBossToFriendList, customGreeting, getvueState } = require('./lib');
 
 let browser;
 let marketPage;
@@ -20,7 +20,6 @@ let pageNum = 1;
 
 let onetimeStatus = {
     init: false,
-    maxPageNum: 10,
 };
 let textareaSelector = '';
 
@@ -51,7 +50,7 @@ let excludeCompanies = [];
 let excludeJobs = [];
 
 let headless = 'new';
-let openNewTabTime = 1000;
+let openNewTabTime = 2000;
 
 // 读取已投递公司存储，执行 main；
 async function start(conf = {}) {
@@ -102,9 +101,9 @@ async function start(conf = {}) {
         }
     }
 
-    await browser?.close()?.catch(e => myLog('关闭无头浏览器出错', e));
-    browser = null;
-    marketPage = null;
+    // await browser?.close()?.catch(e => myLog('关闭无头浏览器出错', e));
+    // browser = null;
+    // marketPage = null;
 }
 async function main() {
     myLog(
@@ -113,8 +112,6 @@ async function main() {
         }[${salaryRange.join(', ')}]`
     );
     await init();
-
-    if (pageNum > onetimeStatus.maxPageNum) throw new Error(`page 参数错误，超过最大页码${maxPageNum}`);
 
     // 执行 -> 检测 -> 通过则翻页
     await autoSayHello(marketPage);
@@ -129,9 +126,6 @@ async function main() {
     if (targetNum > 0) await main();
 }
 async function autoSayHello(marketPage) {
-    await marketPage.waitForSelector('li.job-card-wrapper').catch(e => {
-        throw new Error(`${timeout / 1000}s 内未获取岗位列表`);
-    });
     let jobCards = Array.from(await marketPage.$$('li.job-card-wrapper'));
     if (!jobCards?.length) throw new Error('岗位列表为空');
 
@@ -139,27 +133,25 @@ async function autoSayHello(marketPage) {
         let companyName = (await node.$eval('.company-name', node => node.innerText)).toLowerCase();
         let jobName = (await node.$eval('.job-name', node => node.innerText)).toLowerCase();
         let fullName = `《${companyName}》 ${jobName}`;
+
         // 选择未沟通的岗位
         let notCommunicate = (await node.$eval('a.start-chat-btn', node => node.innerText)) !== '继续沟通';
         if (!notCommunicate) {
             myLog(`🎃 略过${fullName}：曾沟通`);
             return false;
         }
-
         // 筛选公司名
         let excludeCompanyName = excludeCompanies.find(name => companyName.includes(name));
         if (excludeCompanyName) {
             myLog(`🎃 略过${fullName}，包含屏蔽公司关键词（${excludeCompanyName}）`);
             return false;
         }
-
         // 筛选岗位名
         let excludeJobName = excludeJobs.find(name => jobName.includes(name));
         if (excludeJobName) {
             myLog(`🎃 略过${fullName}，包含屏蔽工作关键词（${excludeJobName}）`);
             return false;
         }
-
         // 筛选薪资
         let [oriSalaryMin, oriSalaryMax] = handleSalary(await node.$eval('.salary', node => node.innerText));
         let [customSalaryMin, customSalaryMax] = salaryRange;
@@ -184,13 +176,23 @@ async function autoSayHello(marketPage) {
         });
         return true;
     });
+
+    // 仅岗位列表可以访问. evaluate 中可以打印
+    let vueState = await marketPage.evaluate(() => {
+        let wrap = document.querySelector('#wrap');
+        if (!wrap.__vue__) throw new Error('未找到vue根组件');
+        return {
+            userInfo: wrap.__vue__?.$store?.state,
+        };
+    });
+
     while (notPostJobs.length && targetNum > 0) {
         let node = notPostJobs.shift();
-        await sendHello(node, marketPage);
+        await sendHello(node, marketPage, vueState);
     }
 }
 // sendHello 跳转到岗位详情页。至少有 3s 等待
-async function sendHello(node, marketPage) {
+async function sendHello(node, marketPage, vueState) {
     await marketPage.evaluate(node => node.click(), node); // 点击节点，打开公司详情页
     await sleep(openNewTabTime); // 等待新页面加载。远程浏览器需要更多时间，此处连接或新开页面，时间都会变动。
 
@@ -204,6 +206,7 @@ async function sendHello(node, marketPage) {
     let { oriSalaryMin = 0, oriSalaryMax = 0, companyName = '', jobName = '' } = node.data;
     const fullName = `《${companyName}》 ${jobName}`;
 
+    // 过滤 BOSS 活跃时间
     if (bossActiveType && bossActiveType !== '无限制') {
         let resList = await Promise.allSettled([
             detailPage.$eval('.boss-active-time', node => node.innerText),
@@ -216,57 +219,92 @@ async function sendHello(node, marketPage) {
         }
     }
 
+    // 过滤沟通过的
     let communityBtn = await detailPage.waitForSelector('.btn.btn-startchat').catch(e => {
         myLog(`${timeout / 1000}s 内未获取到详情页沟通按钮`);
         throw new Error(e);
     });
     let communityBtnInnerText = await detailPage.evaluate(communityBtn => communityBtn.innerText, communityBtn);
-    // 沟通列表偶尔会缺少待打开的岗位，目前仅 window 出现。等待 add.json 接口。岗位详情页点击打开的链接不对，没有携带 id 等参数
-    // console.log('🔎 ~ sendHello ~ communityBtnInnerText data-url:', !(await detailPage.evaluate(communityBtn => communityBtn.getAttribute('data-url'), communityBtn)) && true);
-
     if (communityBtnInnerText.includes('继续沟通')) {
         myLog(`🎃 略过${fullName}，曾沟通`);
         return await detailPage.close();
     }
 
+    // 过滤工作内容屏蔽词
     let jobDetail = (await detailPage.$eval('.job-sec-text', node => node.innerText))?.toLowerCase();
     let foundExcludeSkill = excludeJobs.find(word => jobDetail.includes(word));
     if (foundExcludeSkill) {
         myLog(`🎃 略过${fullName}，工作内容包含屏蔽词：${foundExcludeSkill}。\n🛜 复查链接：${detailPageUrl}`);
         return await detailPage.close();
     }
+    // 过滤不包含关键技能
     let notFoundSkill = keySkills.find(skill => !jobDetail.includes(skill));
     if (keySkills.length && notFoundSkill) {
         myLog(`🎃 略过 ${fullName}，工作内容不包含关键技能：${notFoundSkill}。\n🛜 复查链接：${detailPageUrl}`);
         return await detailPage.close();
     }
 
-    await sleep(1000); // 等1s；沟通列表偶尔会缺少待打开的岗位，仅 window 出现。
-    communityBtn.click(); // 点击后，(1)出现小窗 （2）详情页被替换为沟通列表页
+    // todo node.js 逻辑注入到 window
 
-    let availableTextarea = !textareaSelector
-        ? await initTextareaSelector(detailPage)
-        : await detailPage.waitForSelector(textareaSelector).catch(e => {
-              throw new Error(`尝试投递 ${fullName}。使用 ${textareaSelector}，${timeout / 1000}s 内未获取输入框`);
-          });
+    await Promise.all(
+        detailPage.exposeFunction('addBossToFriendList', addBossToFriendList),
+        detailPage.exposeFunction('customGreeting', customGreeting),
+        detailPage.exposeFunction('sleep', sleep)
+    );
 
-    if (!availableTextarea) {
-        let reachLimit = await detailPage.waitForSelector('div.dialog-title > .title').catch(e => {
-            myLog(`${timeout / 1000}s 内未获取到沟通上限提示`);
-        });
-        if (reachLimit) throw new Error('抵达 Boss 每日沟通上限');
+    await detailPage.evaluate(
+        async ({ helloTxt, jobUrlData, vueState }) => {
+            await addBossToFriendList(jobUrlData);
 
-        throw new Error('没有可用的输入框，点击“启动任务”重试');
-    }
+            await sleep(2000);
 
-    await availableTextarea.type(helloTxt);
-    // 2. 点击发送按钮
-    await detailPage.click('div.send-message').catch(e => e); // 弹窗按钮
-    await detailPage.click('div.message-controls > div > div.chat-op > button').catch(e => e); // 跳转列表按钮
-    await sleep(500); // 等待消息发送
+            await customGreeting(helloTxt, jobUrlData, vueState);
+        },
+        {
+            // addBossToFriendList,
+            // customGreeting,
+            // sleep,
+            helloTxt,
+            jobUrlData: getDataFormJobUrl(detailPage.url()),
+            vueState,
+        }
+    );
+
+    /**
+     * 可跳转到岗位详情； - 为了获取复查链接
+     *
+     * 岗位链接可获取： encryptJobId lid securityId
+
+     * https://www.zhipin.com/job_detail/ec43784c4bd69a221HJ53tm0FVBW.html?lid=MPulwpjgcp.search.1&securityId=zICHVG536gzdP-j12c475rFxmo-vUkkXzTMW1NSRkYaOkDKghqI1tPA7VnX6ZADKHvnPbd7belZ9lzPsmZJJN99eYAq7v4OF0cimxmgvdqs86dRRGtHaY_Pu4WvXzDVlblJShkyBRYu70p0arEsBOXk~&sessionId=
+     * 
+     */
+
+    // await sleep(1000); // 等1s；沟通列表偶尔会缺少待打开的岗位，目前仅 window 出现。等待 add.json 接口。岗位详情页点击打开的链接不对，没有携带 id 等参数
+    // communityBtn.click(); // 点击后，(1)出现小窗 （2）详情页被替换为沟通列表页
+
+    // let availableTextarea = !textareaSelector
+    //     ? await initTextareaSelector(detailPage)
+    //     : await detailPage.waitForSelector(textareaSelector).catch(e => {
+    //           throw new Error(`尝试投递 ${fullName}。使用 ${textareaSelector}，${timeout / 1000}s 内未获取输入框`);
+    //       });
+
+    // if (!availableTextarea) {
+    //     let reachLimit = await detailPage.waitForSelector('div.dialog-title > .title').catch(e => {
+    //         myLog(`${timeout / 1000}s 内未获取到沟通上限提示`);
+    //     });
+    //     if (reachLimit) throw new Error('抵达 Boss 每日沟通上限');
+
+    //     throw new Error('没有可用的输入框，点击“启动任务”重试');
+    // }
+
+    // await availableTextarea.type(helloTxt);
+    // // 2. 点击发送按钮
+    // await detailPage.click('div.send-message').catch(e => e); // 弹窗按钮
+    // await detailPage.click('div.message-controls > div > div.chat-op > button').catch(e => e); // 跳转列表按钮
+    // await sleep(500); // 等待消息发送
+
     targetNum--;
 
-    // 已投递的公司名
     myLog(`✅ ${fullName} [${oriSalaryMin}-${oriSalaryMax}K]`);
 
     return await detailPage.close();
@@ -291,19 +329,11 @@ async function init() {
         });
         // 登录态是否有效
         const headerLoginBtn = await marketPage.waitForSelector('.header-login-btn').catch(e => {
-            onetimeStatus.checkLogin = true;
+            if (e) return false;
         });
         if (headerLoginBtn) throw new Error('登录态过期，请重新获取 cookie');
         // 关闭安全问题弹窗
-        await marketPage.click('.dialog-account-safe > div.dialog-container > div.dialog-title > a').catch(e => {
-            // myLog('未检测到安全问题弹窗');
-            onetimeStatus.checkSafeQues = true;
-        });
-        // 初始化最大页码
-        let lastNumNode = Array.from(await marketPage.$$('.options-pages > a'))
-            .slice(1, -1)
-            .pop();
-        onetimeStatus.maxPageNum = await marketPage.evaluate(node => node.innerText, lastNumNode);
+        await marketPage.click('.dialog-account-safe > div.dialog-container > div.dialog-title > a').catch(e => e);
     }
 }
 /** 启动浏览器，写入 cookie */
@@ -321,6 +351,7 @@ async function initBrowserAndSetCookie() {
             headless, // 是否以浏览器视图调试
             devtools: false,
             defaultViewport: null, // null 则页面和窗口大小一致
+            executablePath: await locateChrome(),
         });
     }
 
@@ -361,28 +392,27 @@ async function checkBossActiveStatus(type, txt = '') {
     if (!txt) return false;
     if (txt === '在线') return true;
 
-    let result = false;
     let prefix = txt.slice(0, txt.indexOf('活跃'));
 
     switch (type) {
         case '半年内活跃': {
             if (['4月内', '5月内', '近半年'].includes(prefix)) {
-                result = true;
+                return true;
             }
         }
         case '3个月内活跃': {
             if (['2月内', '3月内'].includes(prefix)) {
-                result = true;
+                return true;
             }
         }
         case '1个月内活跃': {
             if (['刚刚', '今日', '3日内', '本周', '2周内', '3周内', '本月'].includes(prefix)) {
-                result = true;
+                return true;
             }
         }
     }
 
-    return result;
+    return false;
 }
 
 async function asyncFilter(list = [], fn) {
@@ -395,31 +425,10 @@ function myLog(...args) {
 
     logs.push(`${str}`);
 }
-/**
- * '18-35K·14薪' -> [18, 35]
- * '500-1000元' -> [0.5, 1]
- */
-function handleSalary(str) {
-    let reg = /\d+/g;
-    let [minNum, maxNum] = str.match(reg).map(str => +str);
 
-    // 适配“元”
-    if (!str.includes('K')) {
-        minNum = parseFloat((minNum / 1000).toFixed(4));
-        maxNum = parseFloat((maxNum / 1000).toFixed(4));
-    }
-
-    return [minNum, maxNum];
-}
 /** 重置一次性状态 */
 function resetOnetimeStatus() {
     onetimeStatus.init = false;
-    onetimeStatus.maxPageNum = 10;
-}
-function sleep(time = 1000) {
-    return new Promise((resolve, reject) => {
-        setTimeout(resolve, time);
-    });
 }
 
 module.exports = { main: start, logs };
