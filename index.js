@@ -8,9 +8,11 @@
  * 4. 遇到问题，以 headless=false 进行调试
  */
 
+const fsp = require('fs/promises');
+const path = require('path');
 const puppeteer = require('./puppeteer');
 const locateChrome = require('locate-chrome');
-const { sleep, handleSalary, getDataFormJobUrl, addBossToFriendList, customGreeting, getvueState } = require('./lib');
+const { sleep, handleSalary, getDataFormJobUrl } = require('./utils');
 
 let browser;
 let marketPage;
@@ -178,13 +180,12 @@ async function autoSayHello(marketPage) {
     });
 
     // 仅岗位列表可以访问. evaluate 中可以打印
-    let vueState = await marketPage.evaluate(() => {
+    const vueState = await marketPage.evaluate(() => {
         let wrap = document.querySelector('#wrap');
         if (!wrap.__vue__) throw new Error('未找到vue根组件');
-        return {
-            userInfo: wrap.__vue__?.$store?.state,
-        };
+        return JSON.parse(JSON.stringify(wrap.__vue__?.$store?.state));
     });
+    console.log('🔎 ~ vueState ~ vueState:', vueState);
 
     while (notPostJobs.length && targetNum > 0) {
         let node = notPostJobs.shift();
@@ -245,30 +246,49 @@ async function sendHello(node, marketPage, vueState) {
     }
 
     // todo node.js 逻辑注入到 window
-
-    await Promise.all(
-        detailPage.exposeFunction('addBossToFriendList', addBossToFriendList),
-        detailPage.exposeFunction('customGreeting', customGreeting),
-        detailPage.exposeFunction('sleep', sleep)
+    let scriptStr = await fsp.readFile(path.resolve(__dirname, './window-build/index.js'), 'utf-8');
+    await detailPage.evaluate(
+        (scriptStr, vueState) => {
+            if (!window.vueState) {
+                window.vueState = vueState;
+                console.log(111, window.vueState);
+            }
+            eval(scriptStr);
+        },
+        scriptStr,
+        vueState
     );
+
+    /**
+     * 555 {
+  lid: 'nk85lyzQsV.search.1',
+  securityId: '1zqQPQOGTQxX_-41wsx1JHYSJvZr-hhxJhfLNeyJ40a4cxAPi1BR0Ev8zNE_chvTqELaQyZ9kpOdkbB6A9v4wMho_zse5cL01vPiWmH5HnyTOIZpZHONiO31FUfbIKT-ikBj9EaN7dAMYN0O_Q_tyKedbu01HXvhOVV5FeVu_3aGqyM~',
+  sessionId: '',
+  encryptJobId: '62b08ceba70d8bbe1HNy2NS4GVpZ'
+}
+     */
 
     await detailPage.evaluate(
-        async ({ helloTxt, jobUrlData, vueState }) => {
-            await addBossToFriendList(jobUrlData);
+        async ({ helloTxt, jobUrlData }) => {
+            await window.addBossToFriendList(jobUrlData);
 
-            await sleep(2000);
+            await window.sleep(2000);
 
-            await customGreeting(helloTxt, jobUrlData, vueState);
+            console.log(999, window.vueState);
+
+            await window.customGreeting(helloTxt, jobUrlData, window.vueState);
         },
         {
-            // addBossToFriendList,
-            // customGreeting,
-            // sleep,
             helloTxt,
             jobUrlData: getDataFormJobUrl(detailPage.url()),
-            vueState,
         }
     );
+
+    // await Promise.all([
+    //     detailPage.exposeFunction('addBossToFriendList', addBossToFriendList),
+    //     detailPage.exposeFunction('customGreeting', customGreeting),
+    //     detailPage.exposeFunction('sleep', sleep)
+    // ]);
 
     /**
      * 可跳转到岗位详情； - 为了获取复查链接
@@ -351,7 +371,7 @@ async function initBrowserAndSetCookie() {
             headless, // 是否以浏览器视图调试
             devtools: false,
             defaultViewport: null, // null 则页面和窗口大小一致
-            executablePath: await locateChrome(),
+            // executablePath: await locateChrome(),
         });
     }
 

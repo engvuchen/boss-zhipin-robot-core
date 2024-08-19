@@ -58,33 +58,8 @@ function handleQueryStr(url) {
     return queryObj;
 }
 
-const getRootVue = async () => {
-    let wrap = window.document.querySelector('#wrap');
-    if (!wrap.__vue__) throw new Error('未找到vue根组件');
-    return wrap.__vue__; // wrap.__vue__?.$store?.state
-};
-/**
- * @returns {Object} { key: value }
- */
-function parseCookies() {
-    console.log('🔎 ~ parseCookies ~ window?.document?.cookie:', window?.document?.cookie);
-
-    const cookies = window?.document?.cookie?.split('; '); // 分隔各个 cookie
-    const cookieObject = {};
-
-    cookies.forEach(cookie => {
-        const [key, value] = cookie.split('='); // 分隔 cookie 的键和值
-        cookieObject[key] = decodeURIComponent(value); // 将值解码并存入对象
-    });
-
-    return cookieObject;
-}
-
 module.exports = {
     handleSalary,
     sleep,
-    handleQueryStr,
     getDataFormJobUrl,
-    getRootVue,
-    parseCookies,
 };

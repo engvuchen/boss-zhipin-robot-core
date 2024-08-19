@@ -1,8 +1,7 @@
-const axios = require('axios');
-
-const { StopError } = require('./error');
-const { getRootVue, parseCookies } = require('./utils');
-const { Message } = require('../window/protobuf');
+import axios from 'axios';
+import { StopError } from './error';
+import { parseCookies } from './utils';
+import { Message } from './protobuf';
 
 // function requestCard(params = { securityId: '', lid: '' }) {
 //     return axios.get('https://www.zhipin.com/wapi/zpgeek/job/card.json', {
@@ -19,16 +18,20 @@ const { Message } = require('../window/protobuf');
  * @returns
  */
 async function addBossToFriendList(data = { securityId: '', encryptJobId: '', lid: '' }, retries = 3) {
+    console.log('data', data);
+
     if (retries === 0) throw new StopError('addBossToFriendList 重试多次失败');
 
     const token = parseCookies(window.document.cookies)?.bst;
+    console.log('🔎 ~ addBossToFriendList ~ token:', token);
+
     if (!token) throw new StopError('没有获取到 token');
 
     try {
         const res = await axios({
             url: 'https://www.zhipin.com/wapi/zpgeek/friend/add.json',
             method: 'POST',
-            data: {
+            params: {
                 securityId: data.securityId,
                 jobId: data.encryptJobId,
                 lid: data.lid,
@@ -38,6 +41,9 @@ async function addBossToFriendList(data = { securityId: '', encryptJobId: '', li
         if (res.data.code === 1 && res.data?.zpData?.bizData?.chatRemindDialog?.content) {
             throw new StopError(res.data?.zpData?.bizData?.chatRemindDialog?.content);
         }
+
+        console.log(101, res);
+
         if (res.data.code !== 0) {
             throw new StopError('状态错误:' + res.data.message);
         }
@@ -48,7 +54,7 @@ async function addBossToFriendList(data = { securityId: '', encryptJobId: '', li
             throw e;
         }
 
-        return addBossToFriendList(data, e.message, retries - 1);
+        return addBossToFriendList(data, retries - 1);
     }
 }
 
@@ -56,17 +62,19 @@ async function addBossToFriendList(data = { securityId: '', encryptJobId: '', li
  * 给BOSS打招呼
  * @param {String} helloTxt
  */
-async function customGreeting(helloTxt, jobUrlData, rootVue) {
-    // console.log(333, getRootVue()?.userInfo?.value);
+async function customGreeting(helloTxt, jobUrlData, vueState) {
+    console.log('🔎 ~ customGreeting ~ vueState:', vueState);
 
-    const userInfo = rootVue?.userInfo?.value;
+    const userInfo = vueState?.userInfo?.value;
+    console.log('🔎 ~ customGreeting ~ userInfo:', userInfo);
+
     const uid = userInfo?.userId; // todo 从页面上的 dom 获取
     if (!uid) throw new Error('没有获取到 uid');
 
     const bossData = await requestBossData({
         encryptUserId: userInfo.encryptUserId,
         securityId: jobUrlData.securityId,
-    }); // todo 获取 bossId
+    }); // 获取 bossId
 
     const buf = new Message({
         form_uid: uid.toString(),
@@ -118,7 +126,4 @@ async function requestBossData(params = { encryptUserId: '', securityId: '' }, r
     }
 }
 
-module.exports = {
-    addBossToFriendList,
-    customGreeting,
-};
+export { addBossToFriendList, customGreeting };

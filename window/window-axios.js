@@ -1,4 +1,5 @@
-const axios = require('axios');
+// const axios = require('axios');
+import axios from 'axios';
 
 function xhrAdapter({
     url = '',
@@ -55,4 +56,4 @@ const axiosIns = axios.create({
     adapter: xhrAdapter,
 });
 
-module.exports = axiosIns;
+export { axiosIns };
