@@ -2,7 +2,7 @@ import protobuf from 'protobufjs';
 // import { TechwolfChatProtocol } from './type';
 // import { unsafeWindow } from '$';
 
-var Root = protobuf.Root,
+const Root = protobuf.Root,
     Type = protobuf.Type,
     Field = protobuf.Field;
 
@@ -42,7 +42,7 @@ const root = new Root()
     );
 const AwesomeMessage = root.lookupType('TechwolfChatProtocol');
 
-export class Message {
+class Message {
     msg;
     hex;
     constructor({ form_uid, to_uid, to_name, content }) {
@@ -81,6 +81,10 @@ export class Message {
         return this.msg.buffer.slice(0, this.msg.byteLength);
     }
     send() {
+        console.log(999, window.ChatWebsocket?.send);
+
         window.ChatWebsocket.send(this);
     }
 }
+
+export { Message };

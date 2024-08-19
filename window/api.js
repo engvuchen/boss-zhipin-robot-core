@@ -18,13 +18,9 @@ import { Message } from './protobuf';
  * @returns
  */
 async function addBossToFriendList(data = { securityId: '', encryptJobId: '', lid: '' }, retries = 3) {
-    console.log('data', data);
-
     if (retries === 0) throw new StopError('addBossToFriendList 重试多次失败');
 
     const token = parseCookies(window.document.cookies)?.bst;
-    console.log('🔎 ~ addBossToFriendList ~ token:', token);
-
     if (!token) throw new StopError('没有获取到 token');
 
     try {
@@ -41,8 +37,6 @@ async function addBossToFriendList(data = { securityId: '', encryptJobId: '', li
         if (res.data.code === 1 && res.data?.zpData?.bizData?.chatRemindDialog?.content) {
             throw new StopError(res.data?.zpData?.bizData?.chatRemindDialog?.content);
         }
-
-        console.log(101, res);
 
         if (res.data.code !== 0) {
             throw new StopError('状态错误:' + res.data.message);
@@ -63,10 +57,7 @@ async function addBossToFriendList(data = { securityId: '', encryptJobId: '', li
  * @param {String} helloTxt
  */
 async function customGreeting(helloTxt, jobUrlData, vueState) {
-    console.log('🔎 ~ customGreeting ~ vueState:', vueState);
-
-    const userInfo = vueState?.userInfo?.value;
-    console.log('🔎 ~ customGreeting ~ userInfo:', userInfo);
+    const userInfo = vueState?.userInfo;
 
     const uid = userInfo?.userId; // todo 从页面上的 dom 获取
     if (!uid) throw new Error('没有获取到 uid');
@@ -82,6 +73,9 @@ async function customGreeting(helloTxt, jobUrlData, vueState) {
         to_name: bossData.data.encryptBossId, // encryptUserId
         content: helloTxt,
     });
+
+    console.log(333, buf.send);
+
     buf.send();
 }
 /**

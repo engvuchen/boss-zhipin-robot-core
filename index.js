@@ -180,20 +180,27 @@ async function autoSayHello(marketPage) {
     });
 
     // 仅岗位列表可以访问. evaluate 中可以打印
-    const vueState = await marketPage.evaluate(() => {
+    const { vueState, ChatWebsocket } = await marketPage.evaluate(() => {
         let wrap = document.querySelector('#wrap');
-        if (!wrap.__vue__) throw new Error('未找到vue根组件');
-        return JSON.parse(JSON.stringify(wrap.__vue__?.$store?.state));
+        if (!wrap?.__vue__?.$store?.state) throw new Error('未找到 vue 数据');
+
+        console.log(999, wrap.__vue__.$store.state);
+
+        return {
+            vueState: JSON.parse(JSON.stringify(wrap.__vue__.$store.state)),
+            ChatWebsocket: window.ChatWebsocket.send, // 函数不能序列化
+        };
     });
-    console.log('🔎 ~ vueState ~ vueState:', vueState);
+
+    console.log(333, vueState, ChatWebsocket);
 
     while (notPostJobs.length && targetNum > 0) {
         let node = notPostJobs.shift();
-        await sendHello(node, marketPage, vueState);
+        await sendHello(node, marketPage, { vueState, ChatWebsocket });
     }
 }
 // sendHello 跳转到岗位详情页。至少有 3s 等待
-async function sendHello(node, marketPage, vueState) {
+async function sendHello(node, marketPage, { vueState, ChatWebsocket } = {}) {
     await marketPage.evaluate(node => node.click(), node); // 点击节点，打开公司详情页
     await sleep(openNewTabTime); // 等待新页面加载。远程浏览器需要更多时间，此处连接或新开页面，时间都会变动。
 
@@ -248,34 +255,23 @@ async function sendHello(node, marketPage, vueState) {
     // todo node.js 逻辑注入到 window
     let scriptStr = await fsp.readFile(path.resolve(__dirname, './window-build/index.js'), 'utf-8');
     await detailPage.evaluate(
-        (scriptStr, vueState) => {
-            if (!window.vueState) {
-                window.vueState = vueState;
-                console.log(111, window.vueState);
-            }
+        (scriptStr, vueState, ChatWebsocket) => {
+            console.log('🔎 ~ sendHello ~ vueState, ChatWebsocket:', vueState, ChatWebsocket);
+
+            if (!window.vueState) window.vueState = vueState;
+            if (!window.ChatWebsocket) window.ChatWebsocket = ChatWebsocket;
+
             eval(scriptStr);
         },
         scriptStr,
-        vueState
+        vueState,
+        ChatWebsocket
     );
-
-    /**
-     * 555 {
-  lid: 'nk85lyzQsV.search.1',
-  securityId: '1zqQPQOGTQxX_-41wsx1JHYSJvZr-hhxJhfLNeyJ40a4cxAPi1BR0Ev8zNE_chvTqELaQyZ9kpOdkbB6A9v4wMho_zse5cL01vPiWmH5HnyTOIZpZHONiO31FUfbIKT-ikBj9EaN7dAMYN0O_Q_tyKedbu01HXvhOVV5FeVu_3aGqyM~',
-  sessionId: '',
-  encryptJobId: '62b08ceba70d8bbe1HNy2NS4GVpZ'
-}
-     */
 
     await detailPage.evaluate(
         async ({ helloTxt, jobUrlData }) => {
             await window.addBossToFriendList(jobUrlData);
-
             await window.sleep(2000);
-
-            console.log(999, window.vueState);
-
             await window.customGreeting(helloTxt, jobUrlData, window.vueState);
         },
         {
