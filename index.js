@@ -47,7 +47,7 @@ let targetNum;
 let timeout = 3000;
 let salaryRange = [0, Infinity];
 let keySkills = [];
-let bossActiveType;
+let bossActiveType = '无限制';
 let excludeCompanies = [];
 let excludeJobs = [];
 
@@ -64,7 +64,7 @@ async function start(conf = {}) {
         timeout = 3000,
         salaryRange = [0, Infinity],
         keySkills = [],
-        bossActiveType = '',
+        bossActiveType = '无限制',
         excludeCompanies = [],
         excludeJobs = [],
         headless = 'new',
@@ -90,14 +90,23 @@ async function start(conf = {}) {
         myLog('当前页码', pageNum);
         myLog('📊 未投递岗位数：', targetNum, '；略过岗位数：', ignoreNum);
 
-        // 报错后检测是否为 Boss 安全检测
-        let validateButton = await marketPage
-            .waitForSelector('#wrap > div > div.error-content > div > button[ka="validate_button_click"]')
-            .catch(e => {
-                myLog(`${timeout / 1000}s 内未获取到验证问题按钮`);
-            });
-        if (validateButton) {
-            myLog('❌ 执行出错：检测到 Boss 安全校验。请先在 Boss 网页上完成验证后重试');
+        let resList = await Promise.allSettled([
+            // 检测 Boss 安全检测
+            marketPage
+                .waitForSelector('#wrap > div > div.error-content > div > button[ka="validate_button_click"]')
+                .catch(e => {
+                    myLog(`${timeout / 1000}s 内未获取到验证问题`);
+                }),
+            // 检测 抵达沟通上限
+            marketPage.waitForSelector('div.dialog-title > .title').catch(e => {
+                myLog(`${timeout / 1000}s 内未获取到沟通上限提示`);
+            }),
+        ]);
+        let [isGotAught, isReachLimit] = resList.filter(curr => curr.status === 'fulfilled');
+
+        if (isGotAught || isReachLimit) {
+            if (isGotAught) myLog('❌ 执行出错：检测到 Boss 安全校验。请先在 Boss 网页上完成验证后重试');
+            if (isReachLimit) myLog('❌ 执行出错：抵达 Boss 每日沟通上限（100）');
         } else {
             myLog('❌ 执行出错', error);
         }
@@ -107,16 +116,26 @@ async function start(conf = {}) {
     // browser = null;
     // marketPage = null;
 }
-async function main() {
+async function main(vueState) {
     myLog(
         `页码：${pageNum}；剩余目标：${targetNum}；自定义薪资范围：${
             salaryRange[1] === Infinity ? '不限。' : ''
         }[${salaryRange.join(', ')}]`
     );
-    await init();
+
+    await init(); // 初次可能得到岗位页
+
+    if (!vueState) {
+        vueState = await marketPage.evaluate(() => {
+            let vueState = document.querySelector('#wrap')?.__vue__?.$store?.state;
+            if (!wrap?.__vue__?.$store?.state) throw new Error('未找到 vue 数据');
+            return JSON.parse(JSON.stringify(vueState));
+        });
+    }
 
     // 执行 -> 检测 -> 通过则翻页
-    await autoSayHello(marketPage);
+    await autoSayHello(marketPage, vueState);
+
     // 尝试点击右翻页按钮。实践中发现最多显示 10 页（一页 30 个岗位）
     let nextPageBtn = await marketPage.waitForSelector('.ui-icon-arrow-right');
     if ((await marketPage.evaluate(node => node?.parentElement?.className, nextPageBtn)) === 'disabled') {
@@ -125,25 +144,31 @@ async function main() {
     ++pageNum;
     await marketPage.evaluate(node => node.click(), nextPageBtn);
 
-    if (targetNum > 0) await main();
+    if (targetNum > 0) await main(vueState); // 递归 main
 }
-async function autoSayHello(marketPage) {
-    let jobCards = Array.from(await marketPage.$$('li.job-card-wrapper'));
-    if (!jobCards?.length) throw new Error('岗位列表为空');
+async function autoSayHello(marketPage, vueState) {
+    // 仅岗位列表可以访问. evaluate 中可以打印
+    const jobList = await marketPage.evaluate(() => {
+        let jobList = document.querySelector('#wrap .page-job-wrapper')?.__vue__?.jobList;
+        return JSON.parse(JSON.stringify(jobList));
+    });
 
-    let notPostJobs = await asyncFilter(jobCards, async (node, index) => {
-        let companyName = (await node.$eval('.company-name', node => node.innerText)).toLowerCase();
-        let jobName = (await node.$eval('.job-name', node => node.innerText)).toLowerCase();
-        let fullName = `《${companyName}》 ${jobName}`;
+    console.log(333, vueState, jobList);
+
+    if (!jobList?.length) throw new Error('岗位列表为空');
+
+    let notPostJobs = jobList.filter(async job => {
+        let { contact, branchName, jobName, salaryDesc } = job;
+
+        let fullName = `《${branchName}》 ${jobName}`;
 
         // 选择未沟通的岗位
-        let notCommunicate = (await node.$eval('a.start-chat-btn', node => node.innerText)) !== '继续沟通';
-        if (!notCommunicate) {
+        if (!contact) {
             myLog(`🎃 略过${fullName}：曾沟通`);
             return false;
         }
         // 筛选公司名
-        let excludeCompanyName = excludeCompanies.find(name => companyName.includes(name));
+        let excludeCompanyName = excludeCompanies.find(name => branchName.includes(name));
         if (excludeCompanyName) {
             myLog(`🎃 略过${fullName}，包含屏蔽公司关键词（${excludeCompanyName}）`);
             return false;
@@ -154,8 +179,8 @@ async function autoSayHello(marketPage) {
             myLog(`🎃 略过${fullName}，包含屏蔽工作关键词（${excludeJobName}）`);
             return false;
         }
-        // 筛选薪资
-        let [oriSalaryMin, oriSalaryMax] = handleSalary(await node.$eval('.salary', node => node.innerText));
+        // 筛选薪资 取区间有交集的
+        let [oriSalaryMin, oriSalaryMax] = handleSalary(salaryDesc);
         let [customSalaryMin, customSalaryMax] = salaryRange;
         let availSalary =
             customSalaryMax === Infinity
@@ -168,37 +193,81 @@ async function autoSayHello(marketPage) {
             return false;
         }
 
-        Object.assign(node, {
-            data: {
-                oriSalaryMin,
-                oriSalaryMax,
-                jobName,
-                companyName,
-            },
-        });
+        job._fullName = fullName;
+        job._desc = `${fullName} [${oriSalaryMin}-${oriSalaryMax}K]`;
+
         return true;
     });
 
-    // 仅岗位列表可以访问. evaluate 中可以打印
-    const { vueState, ChatWebsocket } = await marketPage.evaluate(() => {
-        let wrap = document.querySelector('#wrap');
-        if (!wrap?.__vue__?.$store?.state) throw new Error('未找到 vue 数据');
-
-        console.log(999, wrap.__vue__.$store.state);
-
-        return {
-            vueState: JSON.parse(JSON.stringify(wrap.__vue__.$store.state)),
-            ChatWebsocket: window.ChatWebsocket.send, // 函数不能序列化
-        };
-    });
-
-    console.log(333, vueState, ChatWebsocket);
-
     while (notPostJobs.length && targetNum > 0) {
-        let node = notPostJobs.shift();
-        await sendHello(node, marketPage, { vueState, ChatWebsocket });
+        let job = notPostJobs.shift();
+        await newSendHello(job, marketPage, { vueState });
     }
 }
+
+async function newSendHello(job, marketPage, { vueState }) {
+    let { _fullName: fullName, _desc: desc, securityId, lid, encryptJobId } = job;
+
+    /**
+     * 打招呼参数
+     * 工作内容、活跃时间
+     *
+     * 需要通过接口获取
+     */
+
+    // 过滤沟通过的
+    // let communityBtn = await detailPage.waitForSelector('.btn.btn-startchat').catch(e => {
+    //     myLog(`${timeout / 1000}s 内未获取到详情页沟通按钮`);
+    //     throw new Error(e);
+    // });
+    // let communityBtnInnerText = await detailPage.evaluate(communityBtn => communityBtn.innerText, communityBtn);
+    // if (communityBtnInnerText.includes('继续沟通')) {
+    //     myLog(`🎃 略过${fullName}，曾沟通`);
+    //     return await detailPage.close();
+    // }
+
+    let scriptStr = await fsp.readFile(path.resolve(__dirname, './window-build/index.js'), 'utf-8');
+    // 应该可以
+    await detailPage.evaluate(
+        async ({ vueState, scriptStr }) => {
+            if (!window.vueState) window.vueState = vueState;
+            eval(scriptStr);
+        },
+        {
+            vueState,
+            scriptStr,
+        }
+    );
+
+    await detailPage.evaluate(
+        async ({ helloTxt, securityId, lid }) => {
+            // todo 过滤
+
+            // { securityId: '', encryptJobId: '', lid: '' }
+            await window.addBossToFriendList({
+                securityId,
+                lid,
+                encryptJobId,
+            }); // todo
+
+            await window.sleep(2000);
+
+            // { helloTxt, vueState, securityId }
+            await window.customGreeting({ helloTxt, vueState, securityId });
+        },
+        {
+            helloTxt,
+            securityId,
+            lid,
+            encryptJobId,
+        }
+    );
+
+    targetNum--;
+
+    myLog(`✅ ${desc}`);
+}
+
 // sendHello 跳转到岗位详情页。至少有 3s 等待
 async function sendHello(node, marketPage, { vueState, ChatWebsocket } = {}) {
     await marketPage.evaluate(node => node.click(), node); // 点击节点，打开公司详情页
@@ -334,8 +403,7 @@ async function sendHello(node, marketPage, { vueState, ChatWebsocket } = {}) {
  */
 async function init() {
     if (!browser) await initBrowserAndSetCookie();
-
-    // 每次页面点击，重新进行初始化
+    // 每次页面点击"执行"，重新进行初始化
     if (!onetimeStatus.init) {
         onetimeStatus.init = true;
 
@@ -403,32 +471,6 @@ async function initTextareaSelector(page) {
     if (selector) textareaSelector = selector;
 
     return originModalTextarea || jumpListTextarea;
-}
-async function checkBossActiveStatus(type, txt = '') {
-    if (!txt) return false;
-    if (txt === '在线') return true;
-
-    let prefix = txt.slice(0, txt.indexOf('活跃'));
-
-    switch (type) {
-        case '半年内活跃': {
-            if (['4月内', '5月内', '近半年'].includes(prefix)) {
-                return true;
-            }
-        }
-        case '3个月内活跃': {
-            if (['2月内', '3月内'].includes(prefix)) {
-                return true;
-            }
-        }
-        case '1个月内活跃': {
-            if (['刚刚', '今日', '3日内', '本周', '2周内', '3周内', '本月'].includes(prefix)) {
-                return true;
-            }
-        }
-    }
-
-    return false;
 }
 
 async function asyncFilter(list = [], fn) {

@@ -3,17 +3,17 @@ import { StopError } from './error';
 import { parseCookies } from './utils';
 import { Message } from './protobuf';
 
-// function requestCard(params = { securityId: '', lid: '' }) {
-//     return axios.get('https://www.zhipin.com/wapi/zpgeek/job/card.json', {
-//         params,
-//         timeout: 5000,
-//     });
-// }
+function requestCard(params = { securityId: '', lid: '' }) {
+    return axios.get('https://www.zhipin.com/wapi/zpgeek/job/card.json', {
+        params,
+        timeout: 5000,
+    });
+}
 
 /**
  * 添加 BOSS 到沟通列表
  * @param {Object} page puppeteerPage
- * @param {Object} data
+ * @param {Object} data { securityId: '', encryptJobId: '', lid: '' }
  * @param {Number} retries
  * @returns
  */
@@ -56,16 +56,15 @@ async function addBossToFriendList(data = { securityId: '', encryptJobId: '', li
  * 给BOSS打招呼
  * @param {String} helloTxt
  */
-async function customGreeting(helloTxt, jobUrlData, vueState) {
+async function customGreeting({ helloTxt, vueState, securityId }) {
     const userInfo = vueState?.userInfo;
-
     const uid = userInfo?.userId; // todo 从页面上的 dom 获取
     if (!uid) throw new Error('没有获取到 uid');
 
-    const bossData = await requestBossData({
+    const bossData = await getBossData({
         encryptUserId: userInfo.encryptUserId,
-        securityId: jobUrlData.securityId,
-    }); // 获取 bossId
+        securityId,
+    }); // 获取打招呼信息
 
     const buf = new Message({
         form_uid: uid.toString(),
@@ -84,8 +83,8 @@ async function customGreeting(helloTxt, jobUrlData, vueState) {
  * @param {Number} retries
  * @returns
  */
-async function requestBossData(params = { encryptUserId: '', securityId: '' }, retries = 3) {
-    if (retries === 0) throw new StopError('requestBossData 重试多次失败');
+async function getBossData(params = { encryptUserId: '', securityId: '' }, retries = 3) {
+    if (retries === 0) throw new StopError('getBossData 重试多次失败');
 
     const token = parseCookies(window.document.cookies)?.bst;
     if (!token) throw new StopError('没有获取到 token');
@@ -107,7 +106,7 @@ async function requestBossData(params = { encryptUserId: '', securityId: '' }, r
                 throw new StopError('状态错误:' + res.data.message);
             }
 
-            return requestBossData(params, '非好友关系', retries - 1);
+            return getBossData(params, '非好友关系', retries - 1);
         }
 
         return res.data.zpData;
@@ -116,8 +115,8 @@ async function requestBossData(params = { encryptUserId: '', securityId: '' }, r
             throw e;
         }
 
-        return requestBossData(params, retries - 1);
+        return getBossData(params, retries - 1);
     }
 }
 
-export { addBossToFriendList, customGreeting };
+export { requestCard, addBossToFriendList, customGreeting };
