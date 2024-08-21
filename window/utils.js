@@ -19,40 +19,40 @@ function parseCookies() {
     return cookieObject;
 }
 
-async function filterByCard(card, { excludeJobs, bossActiveType, fullName }) {
-    let { lid, securityId } = card;
-
+/**
+ * 通过岗位详情接口，校验 BOSS 活跃时间、工作内容（屏蔽词、关键技能）
+ */
+async function checkJobDetail(
+    { lid, securityId, encryptJobId } = {},
+    { excludeJobs, bossActiveType, fullName, keySkills } = {}
+) {
     const res = await requestCard({
         lid,
         securityId,
         encryptJobId,
     });
-    if (res.data.code == 0) throw new Error('请求响应错误:' + res.data.message);
+    if (res.data.code !== 0) throw new Error('请求响应错误:' + res.data.message);
 
     let { activeTimeDesc, postDescription: jobDetail } = res.data.zpData.jobCard;
 
-    // 过滤 BOSS 活跃时间 todo
+    // 过滤 BOSS 活跃时间
     if (
         bossActiveType !== '无限制' &&
         (!activeTimeDesc || !(await checkBossActiveStatus(bossActiveType, activeTimeDesc)))
     ) {
-        myLog(`🎃 略过${fullName}，Boss 活跃时间不符：${activeTimeDesc || '活跃时间不存在'}`);
-        // return await detailPage.close();
-        return false;
+        return `🎃 略过${fullName}，Boss 活跃时间不符：${activeTimeDesc || '活跃时间不存在'}`;
     }
 
     let detailPageUrl = getDetailUrl({ encryptJobId, lid, securityId });
     // 工作内容 不可包含屏蔽词
     let foundExcludeSkill = excludeJobs.find(word => jobDetail.includes(word));
     if (foundExcludeSkill) {
-        myLog(`🎃 略过${fullName}，工作内容包含屏蔽词：${foundExcludeSkill}。\n🛜 复查链接：${detailPageUrl}`);
-        return false;
+        return `🎃 略过${fullName}，工作内容包含屏蔽词：${foundExcludeSkill}。\n🛜 复查链接：${detailPageUrl}`;
     }
     // 工作内容 - 需包含关键技能
     let notFoundSkill = keySkills.find(skill => !jobDetail.includes(skill));
     if (keySkills.length && notFoundSkill) {
-        myLog(`🎃 略过 ${fullName}，工作内容不包含关键技能：${notFoundSkill}。\n🛜 复查链接：${detailPageUrl}`);
-        return false;
+        return `🎃 略过 ${fullName}，工作内容不包含关键技能：${notFoundSkill}。\n🛜 复查链接：${detailPageUrl}`;
     }
 }
 async function checkBossActiveStatus(type, txt = '') {
@@ -85,4 +85,4 @@ function getDetailUrl({ encryptJobId, lid, securityId }) {
     return `https://www.zhipin.com/job_detail/${encryptJobId}.html?lid=${lid}&securityId=${securityId}&sessionId=`;
 }
 
-export { sleep, getDataFormJobUrl, parseCookies, filterByCard };
+export { sleep, getDataFormJobUrl, parseCookies, checkJobDetail };

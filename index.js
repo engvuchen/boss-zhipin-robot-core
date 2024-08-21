@@ -11,7 +11,7 @@
 const fsp = require('fs/promises');
 const path = require('path');
 const puppeteer = require('./puppeteer');
-const locateChrome = require('locate-chrome');
+// const locateChrome = require('locate-chrome');
 const { sleep, handleSalary, getDataFormJobUrl } = require('./utils');
 
 let browser;
@@ -92,15 +92,15 @@ async function start(conf = {}) {
 
         let resList = await Promise.allSettled([
             // 检测 Boss 安全检测
-            marketPage
-                .waitForSelector('#wrap > div > div.error-content > div > button[ka="validate_button_click"]')
-                .catch(e => {
-                    myLog(`${timeout / 1000}s 内未获取到验证问题`);
-                }),
+            marketPage.waitForSelector('#wrap > div > div.error-content > div > button[ka="validate_button_click"]'),
+            // .catch(e => {
+            //     myLog(`${timeout / 1000}s 内未获取到验证问题`);
+            // }),
             // 检测 抵达沟通上限
-            marketPage.waitForSelector('div.dialog-title > .title').catch(e => {
-                myLog(`${timeout / 1000}s 内未获取到沟通上限提示`);
-            }),
+            marketPage.waitForSelector('div.dialog-title > .title'),
+            // .catch(e => {
+            //     myLog(`${timeout / 1000}s 内未获取到沟通上限提示`);
+            // }),
         ]);
         let [isGotAught, isReachLimit] = resList.filter(curr => curr.status === 'fulfilled');
 
@@ -153,22 +153,22 @@ async function autoSayHello(marketPage, vueState) {
         return JSON.parse(JSON.stringify(jobList));
     });
 
-    console.log(333, vueState, jobList);
+    // console.log(333, vueState, jobList);
 
     if (!jobList?.length) throw new Error('岗位列表为空');
 
     let notPostJobs = jobList.filter(async job => {
-        let { contact, branchName, jobName, salaryDesc } = job;
+        let { contact, brandName, jobName, salaryDesc } = job;
 
-        let fullName = `《${branchName}》 ${jobName}`;
+        let fullName = `《${brandName}》 ${jobName}`;
 
         // 选择未沟通的岗位
-        if (!contact) {
+        if (contact) {
             myLog(`🎃 略过${fullName}：曾沟通`);
             return false;
         }
         // 筛选公司名
-        let excludeCompanyName = excludeCompanies.find(name => branchName.includes(name));
+        let excludeCompanyName = excludeCompanies.find(name => brandName.includes(name));
         if (excludeCompanyName) {
             myLog(`🎃 略过${fullName}，包含屏蔽公司关键词（${excludeCompanyName}）`);
             return false;
@@ -215,20 +215,9 @@ async function newSendHello(job, marketPage, { vueState }) {
      * 需要通过接口获取
      */
 
-    // 过滤沟通过的
-    // let communityBtn = await detailPage.waitForSelector('.btn.btn-startchat').catch(e => {
-    //     myLog(`${timeout / 1000}s 内未获取到详情页沟通按钮`);
-    //     throw new Error(e);
-    // });
-    // let communityBtnInnerText = await detailPage.evaluate(communityBtn => communityBtn.innerText, communityBtn);
-    // if (communityBtnInnerText.includes('继续沟通')) {
-    //     myLog(`🎃 略过${fullName}，曾沟通`);
-    //     return await detailPage.close();
-    // }
-
     let scriptStr = await fsp.readFile(path.resolve(__dirname, './window-build/index.js'), 'utf-8');
-    // 应该可以
-    await detailPage.evaluate(
+
+    await marketPage.evaluate(
         async ({ vueState, scriptStr }) => {
             if (!window.vueState) window.vueState = vueState;
             eval(scriptStr);
@@ -239,27 +228,46 @@ async function newSendHello(job, marketPage, { vueState }) {
         }
     );
 
-    await detailPage.evaluate(
-        async ({ helloTxt, securityId, lid }) => {
-            // todo 过滤
+    let errmsg = await marketPage.evaluate(
+        async ({ securityId, lid, encryptJobId, excludeJobs, bossActiveType, fullName, keySkills }) => {
+            return await window.checkJobDetail(
+                { securityId, lid, encryptJobId },
+                { excludeJobs, bossActiveType, fullName, keySkills }
+            );
+        },
+        {
+            securityId,
+            lid,
+            encryptJobId,
+            excludeJobs,
+            bossActiveType,
+            fullName,
+            keySkills,
+        }
+    );
+    if (errmsg) return myLog(errmsg);
 
+    await marketPage.evaluate(
+        async ({ helloTxt, securityId, lid, encryptJobId }) => {
             // { securityId: '', encryptJobId: '', lid: '' }
             await window.addBossToFriendList({
                 securityId,
                 lid,
                 encryptJobId,
-            }); // todo
+            });
 
             await window.sleep(2000);
 
-            // { helloTxt, vueState, securityId }
-            await window.customGreeting({ helloTxt, vueState, securityId });
+            await window.customGreeting({ helloTxt, vueState: window.vueState, securityId });
         },
         {
             helloTxt,
             securityId,
             lid,
             encryptJobId,
+            excludeJobs,
+            bossActiveType,
+            fullName,
         }
     );
 
@@ -269,131 +277,131 @@ async function newSendHello(job, marketPage, { vueState }) {
 }
 
 // sendHello 跳转到岗位详情页。至少有 3s 等待
-async function sendHello(node, marketPage, { vueState, ChatWebsocket } = {}) {
-    await marketPage.evaluate(node => node.click(), node); // 点击节点，打开公司详情页
-    await sleep(openNewTabTime); // 等待新页面加载。远程浏览器需要更多时间，此处连接或新开页面，时间都会变动。
+// async function sendHello(node, marketPage, { vueState, ChatWebsocket } = {}) {
+//     await marketPage.evaluate(node => node.click(), node); // 点击节点，打开公司详情页
+//     await sleep(openNewTabTime); // 等待新页面加载。远程浏览器需要更多时间，此处连接或新开页面，时间都会变动。
 
-    // 一般只会有一个详情页。打开一页，执行一个任务，然后关闭页面
-    const [detailPage] = (await browser.pages()).filter(page =>
-        page.url().startsWith('https://www.zhipin.com/job_detail')
-    );
-    detailPage?.setDefaultTimeout?.(timeout);
-    const detailPageUrl = detailPage?.url?.();
+//     // 一般只会有一个详情页。打开一页，执行一个任务，然后关闭页面
+//     const [detailPage] = (await browser.pages()).filter(page =>
+//         page.url().startsWith('https://www.zhipin.com/job_detail')
+//     );
+//     detailPage?.setDefaultTimeout?.(timeout);
+//     const detailPageUrl = detailPage?.url?.();
 
-    let { oriSalaryMin = 0, oriSalaryMax = 0, companyName = '', jobName = '' } = node.data;
-    const fullName = `《${companyName}》 ${jobName}`;
+//     let { oriSalaryMin = 0, oriSalaryMax = 0, companyName = '', jobName = '' } = node.data;
+//     const fullName = `《${companyName}》 ${jobName}`;
 
-    // 过滤 BOSS 活跃时间
-    if (bossActiveType && bossActiveType !== '无限制') {
-        let resList = await Promise.allSettled([
-            detailPage.$eval('.boss-active-time', node => node.innerText),
-            detailPage.$eval('.boss-online-tag', node => node.innerText),
-        ]);
-        let res = resList.find(curr => curr.status === 'fulfilled');
-        if (!res || !(await checkBossActiveStatus(bossActiveType, res.value))) {
-            myLog(`🎃 略过${fullName}，Boss 活跃时间不符：${res?.value || '活跃时间不存在'}`);
-            return await detailPage.close();
-        }
-    }
+//     // 过滤 BOSS 活跃时间
+//     if (bossActiveType && bossActiveType !== '无限制') {
+//         let resList = await Promise.allSettled([
+//             detailPage.$eval('.boss-active-time', node => node.innerText),
+//             detailPage.$eval('.boss-online-tag', node => node.innerText),
+//         ]);
+//         let res = resList.find(curr => curr.status === 'fulfilled');
+//         if (!res || !(await checkBossActiveStatus(bossActiveType, res.value))) {
+//             myLog(`🎃 略过${fullName}，Boss 活跃时间不符：${res?.value || '活跃时间不存在'}`);
+//             return await detailPage.close();
+//         }
+//     }
 
-    // 过滤沟通过的
-    let communityBtn = await detailPage.waitForSelector('.btn.btn-startchat').catch(e => {
-        myLog(`${timeout / 1000}s 内未获取到详情页沟通按钮`);
-        throw new Error(e);
-    });
-    let communityBtnInnerText = await detailPage.evaluate(communityBtn => communityBtn.innerText, communityBtn);
-    if (communityBtnInnerText.includes('继续沟通')) {
-        myLog(`🎃 略过${fullName}，曾沟通`);
-        return await detailPage.close();
-    }
+//     // 过滤沟通过的
+//     let communityBtn = await detailPage.waitForSelector('.btn.btn-startchat').catch(e => {
+//         myLog(`${timeout / 1000}s 内未获取到详情页沟通按钮`);
+//         throw new Error(e);
+//     });
+//     let communityBtnInnerText = await detailPage.evaluate(communityBtn => communityBtn.innerText, communityBtn);
+//     if (communityBtnInnerText.includes('继续沟通')) {
+//         myLog(`🎃 略过${fullName}，曾沟通`);
+//         return await detailPage.close();
+//     }
 
-    // 过滤工作内容屏蔽词
-    let jobDetail = (await detailPage.$eval('.job-sec-text', node => node.innerText))?.toLowerCase();
-    let foundExcludeSkill = excludeJobs.find(word => jobDetail.includes(word));
-    if (foundExcludeSkill) {
-        myLog(`🎃 略过${fullName}，工作内容包含屏蔽词：${foundExcludeSkill}。\n🛜 复查链接：${detailPageUrl}`);
-        return await detailPage.close();
-    }
-    // 过滤不包含关键技能
-    let notFoundSkill = keySkills.find(skill => !jobDetail.includes(skill));
-    if (keySkills.length && notFoundSkill) {
-        myLog(`🎃 略过 ${fullName}，工作内容不包含关键技能：${notFoundSkill}。\n🛜 复查链接：${detailPageUrl}`);
-        return await detailPage.close();
-    }
+//     // 过滤工作内容屏蔽词
+//     let jobDetail = (await detailPage.$eval('.job-sec-text', node => node.innerText))?.toLowerCase();
+//     let foundExcludeSkill = excludeJobs.find(word => jobDetail.includes(word));
+//     if (foundExcludeSkill) {
+//         myLog(`🎃 略过${fullName}，工作内容包含屏蔽词：${foundExcludeSkill}。\n🛜 复查链接：${detailPageUrl}`);
+//         return await detailPage.close();
+//     }
+//     // 过滤不包含关键技能
+//     let notFoundSkill = keySkills.find(skill => !jobDetail.includes(skill));
+//     if (keySkills.length && notFoundSkill) {
+//         myLog(`🎃 略过 ${fullName}，工作内容不包含关键技能：${notFoundSkill}。\n🛜 复查链接：${detailPageUrl}`);
+//         return await detailPage.close();
+//     }
 
-    // todo node.js 逻辑注入到 window
-    let scriptStr = await fsp.readFile(path.resolve(__dirname, './window-build/index.js'), 'utf-8');
-    await detailPage.evaluate(
-        (scriptStr, vueState, ChatWebsocket) => {
-            console.log('🔎 ~ sendHello ~ vueState, ChatWebsocket:', vueState, ChatWebsocket);
+//     // todo node.js 逻辑注入到 window
+//     let scriptStr = await fsp.readFile(path.resolve(__dirname, './window-build/index.js'), 'utf-8');
+//     await detailPage.evaluate(
+//         (scriptStr, vueState, ChatWebsocket) => {
+//             console.log('🔎 ~ sendHello ~ vueState, ChatWebsocket:', vueState, ChatWebsocket);
 
-            if (!window.vueState) window.vueState = vueState;
-            if (!window.ChatWebsocket) window.ChatWebsocket = ChatWebsocket;
+//             if (!window.vueState) window.vueState = vueState;
+//             if (!window.ChatWebsocket) window.ChatWebsocket = ChatWebsocket;
 
-            eval(scriptStr);
-        },
-        scriptStr,
-        vueState,
-        ChatWebsocket
-    );
+//             eval(scriptStr);
+//         },
+//         scriptStr,
+//         vueState,
+//         ChatWebsocket
+//     );
 
-    await detailPage.evaluate(
-        async ({ helloTxt, jobUrlData }) => {
-            await window.addBossToFriendList(jobUrlData);
-            await window.sleep(2000);
-            await window.customGreeting(helloTxt, jobUrlData, window.vueState);
-        },
-        {
-            helloTxt,
-            jobUrlData: getDataFormJobUrl(detailPage.url()),
-        }
-    );
+//     await detailPage.evaluate(
+//         async ({ helloTxt, jobUrlData }) => {
+//             await window.addBossToFriendList(jobUrlData);
+//             await window.sleep(2000);
+//             await window.customGreeting(helloTxt, jobUrlData, window.vueState);
+//         },
+//         {
+//             helloTxt,
+//             jobUrlData: getDataFormJobUrl(detailPage.url()),
+//         }
+//     );
 
-    // await Promise.all([
-    //     detailPage.exposeFunction('addBossToFriendList', addBossToFriendList),
-    //     detailPage.exposeFunction('customGreeting', customGreeting),
-    //     detailPage.exposeFunction('sleep', sleep)
-    // ]);
+//     // await Promise.all([
+//     //     detailPage.exposeFunction('addBossToFriendList', addBossToFriendList),
+//     //     detailPage.exposeFunction('customGreeting', customGreeting),
+//     //     detailPage.exposeFunction('sleep', sleep)
+//     // ]);
 
-    /**
-     * 可跳转到岗位详情； - 为了获取复查链接
-     *
-     * 岗位链接可获取： encryptJobId lid securityId
+//     /**
+//      * 可跳转到岗位详情； - 为了获取复查链接
+//      *
+//      * 岗位链接可获取： encryptJobId lid securityId
 
-     * https://www.zhipin.com/job_detail/ec43784c4bd69a221HJ53tm0FVBW.html?lid=MPulwpjgcp.search.1&securityId=zICHVG536gzdP-j12c475rFxmo-vUkkXzTMW1NSRkYaOkDKghqI1tPA7VnX6ZADKHvnPbd7belZ9lzPsmZJJN99eYAq7v4OF0cimxmgvdqs86dRRGtHaY_Pu4WvXzDVlblJShkyBRYu70p0arEsBOXk~&sessionId=
-     * 
-     */
+//      * https://www.zhipin.com/job_detail/ec43784c4bd69a221HJ53tm0FVBW.html?lid=MPulwpjgcp.search.1&securityId=zICHVG536gzdP-j12c475rFxmo-vUkkXzTMW1NSRkYaOkDKghqI1tPA7VnX6ZADKHvnPbd7belZ9lzPsmZJJN99eYAq7v4OF0cimxmgvdqs86dRRGtHaY_Pu4WvXzDVlblJShkyBRYu70p0arEsBOXk~&sessionId=
+//      *
+//      */
 
-    // await sleep(1000); // 等1s；沟通列表偶尔会缺少待打开的岗位，目前仅 window 出现。等待 add.json 接口。岗位详情页点击打开的链接不对，没有携带 id 等参数
-    // communityBtn.click(); // 点击后，(1)出现小窗 （2）详情页被替换为沟通列表页
+//     // await sleep(1000); // 等1s；沟通列表偶尔会缺少待打开的岗位，目前仅 window 出现。等待 add.json 接口。岗位详情页点击打开的链接不对，没有携带 id 等参数
+//     // communityBtn.click(); // 点击后，(1)出现小窗 （2）详情页被替换为沟通列表页
 
-    // let availableTextarea = !textareaSelector
-    //     ? await initTextareaSelector(detailPage)
-    //     : await detailPage.waitForSelector(textareaSelector).catch(e => {
-    //           throw new Error(`尝试投递 ${fullName}。使用 ${textareaSelector}，${timeout / 1000}s 内未获取输入框`);
-    //       });
+//     // let availableTextarea = !textareaSelector
+//     //     ? await initTextareaSelector(detailPage)
+//     //     : await detailPage.waitForSelector(textareaSelector).catch(e => {
+//     //           throw new Error(`尝试投递 ${fullName}。使用 ${textareaSelector}，${timeout / 1000}s 内未获取输入框`);
+//     //       });
 
-    // if (!availableTextarea) {
-    //     let reachLimit = await detailPage.waitForSelector('div.dialog-title > .title').catch(e => {
-    //         myLog(`${timeout / 1000}s 内未获取到沟通上限提示`);
-    //     });
-    //     if (reachLimit) throw new Error('抵达 Boss 每日沟通上限');
+//     // if (!availableTextarea) {
+//     //     let reachLimit = await detailPage.waitForSelector('div.dialog-title > .title').catch(e => {
+//     //         myLog(`${timeout / 1000}s 内未获取到沟通上限提示`);
+//     //     });
+//     //     if (reachLimit) throw new Error('抵达 Boss 每日沟通上限');
 
-    //     throw new Error('没有可用的输入框，点击“启动任务”重试');
-    // }
+//     //     throw new Error('没有可用的输入框，点击“启动任务”重试');
+//     // }
 
-    // await availableTextarea.type(helloTxt);
-    // // 2. 点击发送按钮
-    // await detailPage.click('div.send-message').catch(e => e); // 弹窗按钮
-    // await detailPage.click('div.message-controls > div > div.chat-op > button').catch(e => e); // 跳转列表按钮
-    // await sleep(500); // 等待消息发送
+//     // await availableTextarea.type(helloTxt);
+//     // // 2. 点击发送按钮
+//     // await detailPage.click('div.send-message').catch(e => e); // 弹窗按钮
+//     // await detailPage.click('div.message-controls > div > div.chat-op > button').catch(e => e); // 跳转列表按钮
+//     // await sleep(500); // 等待消息发送
 
-    targetNum--;
+//     targetNum--;
 
-    myLog(`✅ ${fullName} [${oriSalaryMin}-${oriSalaryMax}K]`);
+//     myLog(`✅ ${fullName} [${oriSalaryMin}-${oriSalaryMax}K]`);
 
-    return await detailPage.close();
-}
+//     return await detailPage.close();
+// }
 /**
  * 尝试初始化浏览器、cookie
  * 打开岗位页
