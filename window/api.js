@@ -39,7 +39,7 @@ async function addBossToFriendList(data = { securityId: '', encryptJobId: '', li
         }
 
         if (res.data.code !== 0) {
-            throw new StopError('状态错误:' + res.data.message);
+            throw new StopError('状态错误：' + res.data.message);
         }
 
         return res.data;
@@ -103,7 +103,7 @@ async function getBossData(params = { encryptUserId: '', securityId: '' }, retri
         });
         if (res.data.code !== 0) {
             if (res.data.message !== '非好友关系') {
-                throw new StopError('状态错误:' + res.data.message);
+                throw new StopError('状态错误：' + res.data.message);
             }
 
             return getBossData(params, '非好友关系', retries - 1);
