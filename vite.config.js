@@ -4,16 +4,9 @@ const { defineConfig } = require('vite');
 // https://vitejs.dev/config/
 export default env => {
     return defineConfig({
-        // root: Path.join(__dirname, 'lib'),
-        // lib: {
-        //     entry: './window/index.js',
-        //     name: 'window-index',
-        // },
         plugins: [],
         resolve: {
-            alias: {
-                // '@': path.resolve(__dirname, 'src'),
-            },
+            alias: {},
         },
         build: {
             outDir: Path.join(__dirname, 'window-build'),
@@ -33,11 +26,6 @@ export default env => {
                     assetFileNames: undefined, // 不输出其他类型的文件（如样式表和 HTML）
                     manualChunks: undefined, // 禁用代码分割
                 },
-            },
-            externalGlobals: {
-                // vue: cdn.jsdelivr('Vue', 'dist/vue.global.prod.js').concat(util.dataUrl(';window.Vue=Vue;')),
-                // 'element-plus': cdn.jsdelivr('ElementPlus', 'dist/index.full.min.js'),
-                // protobufjs: cdn.jsdelivr('protobuf', 'dist/light/protobuf.min.js'),
             },
         },
     });

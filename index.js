@@ -1,17 +1,6 @@
-/**
- * 细节：
- * 1. 公司下存在多个职位，名字可能是一样的，但岗位要求不一样；
- * 1.1 区分是否投递过，简单方法就是列表、详情页的“继续沟通”文案；
- * 2. 选择器拿不到，可能是出现“安全问题”弹窗；$$、$、$eval、page.click 等可能会失败
- * 3. arms-retcode.aliyuncs.com/r.png 这个请求 window 本地也会失败
- *
- * 4. 遇到问题，以 headless=false 进行调试
- */
-
 const fsp = require('fs/promises');
 const path = require('path');
 const puppeteer = require('./puppeteer');
-// const locateChrome = require('locate-chrome');
 const { sleep, handleSalary } = require('./utils');
 
 let browser;
@@ -23,7 +12,6 @@ let pageNum = 1;
 let onetimeStatus = {
     init: false,
 };
-let textareaSelector = '';
 
 let queryParams = {}; // { page, query, experience, salary }, 只用到 page
 let helloTxt = '';
@@ -52,7 +40,6 @@ let excludeCompanies = [];
 let excludeJobs = [];
 
 let headless = 'new';
-let openNewTabTime = 2000;
 
 // 初始化参数、初始化一次性状态、全局错误处理
 async function start(conf = {}) {
@@ -191,7 +178,9 @@ async function autoSayHello(marketPage, vueState) {
          */
 
         // 筛选岗位名
-        let excludeJobName = excludeJobs.find(name => jobName.includes(name));
+        let excludeJobName = excludeJobs.find(name => {
+            return jobName.includes(name);
+        });
         if (excludeJobName) {
             myLog(`🎃 略过${fullName}，包含屏蔽工作关键词（${excludeJobName}）`);
             return false;
@@ -231,7 +220,11 @@ async function autoSayHello(marketPage, vueState) {
  * 发送自定义招呼语
  */
 async function newSendHello(job, marketPage, { vueState }) {
-    let { _fullName: fullName, _desc: desc, securityId, lid, encryptJobId } = job;
+    let { _fullName: fullName, _desc: desc, securityId, lid, encryptJobId } = job; // todo _fullName、_desc 偶尔是 undefined
+    if (fullName === undefined || desc === undefined) {
+        myLog('fullName 或 desc undefined', JSON.stringify(job));
+        return;
+    }
 
     // 浏览器挂载 vueState，打招呼相关的 api
     let scriptStr = await fsp.readFile(path.resolve(__dirname, './window-build/index.js'), 'utf-8');
@@ -326,13 +319,11 @@ async function initBrowserAndSetCookie() {
         browser = await puppeteer.connect({
             browserWSEndpoint: BROWERLESS,
         });
-        openNewTabTime = 3000;
     } else {
         browser = await puppeteer.launch({
             headless, // 是否以浏览器视图调试
             devtools: false,
             defaultViewport: null, // null 则页面和窗口大小一致
-            // executablePath: await locateChrome(),
         });
     }
 
@@ -349,38 +340,13 @@ function getMarketUrl() {
         .map(key => `${key}=${encodeURIComponent(queryParams[key])}`)
         .join('&')}`;
 }
-// 获取输入框选择器，需经过 setDefaultTimeout 耗时（自定义为 3s）。且返回选取节点
-async function initTextareaSelector(page) {
-    let originModalTextareaSelector = 'div.edit-area > textarea';
-    let jumpListTextareaSelector = 'div.chat-conversation > div.message-controls > div > div.chat-input';
 
-    let [originModalTextarea, jumpListTextarea] = await Promise.all([
-        page.waitForSelector(originModalTextareaSelector).catch(e => {
-            myLog(`${timeout / 1000}s 内未获取到小窗输入框`);
-        }),
-        page.waitForSelector(jumpListTextareaSelector).catch(e => {
-            myLog(`${timeout / 1000}s 内未获取到沟通列表输入框`);
-        }),
-    ]);
-
-    const selector =
-        (originModalTextarea && originModalTextareaSelector) || (jumpListTextarea && jumpListTextareaSelector);
-    if (selector) textareaSelector = selector;
-
-    return originModalTextarea || jumpListTextarea;
-}
-
-async function asyncFilter(list = [], fn) {
-    const results = await Promise.all(list.map(fn)); // 建设成功返回 true，失败返回 false
-    return list.filter((_v, index) => results[index]);
-}
 function myLog(...args) {
     let str = args.join(' ');
     if (str.includes('略过')) ignoreNum++;
 
     logs.push(`${str}`);
 }
-
 /** 重置一次性状态 */
 function resetOnetimeStatus() {
     onetimeStatus.init = false;

@@ -40,14 +40,14 @@ async function checkJobDetail(
         bossActiveType !== '无限制' &&
         (!activeTimeDesc || !(await checkBossActiveStatus(bossActiveType, activeTimeDesc)))
     ) {
-        return `🎃 略过${fullName}，Boss 活跃时间不符：${activeTimeDesc || '活跃时间不存在'}`;
+        return `🎃 略过 ${fullName}，Boss 活跃时间不符：${activeTimeDesc || '活跃时间不存在'}`;
     }
 
     let detailPageUrl = getDetailUrl({ encryptJobId, lid, securityId });
     // 工作内容 不可包含屏蔽词
     let foundExcludeSkill = excludeJobs.find(word => jobDetail.includes(word));
     if (foundExcludeSkill) {
-        return `🎃 略过${fullName}，工作内容包含屏蔽词：${foundExcludeSkill}。\n🛜 复查链接：${detailPageUrl}`;
+        return `🎃 略过 ${fullName}，工作内容包含屏蔽词：${foundExcludeSkill}。\n🛜 复查链接：${detailPageUrl}`;
     }
     // 工作内容 - 需包含关键技能
     let notFoundSkill = keySkills.find(skill => !jobDetail.includes(skill));
