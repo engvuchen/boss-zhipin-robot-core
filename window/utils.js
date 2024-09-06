@@ -31,10 +31,9 @@ async function checkJobDetail(
         securityId,
         encryptJobId,
     });
-    if (res.data.code !== 0) throw new Error('请求响应错误:' + res.data.message);
+    if (res.data.code !== 0) throw new Error('requestCard 响应错误:' + res.data.message);
 
     let { activeTimeDesc, postDescription: jobDetail } = res.data.zpData.jobCard;
-
     // 过滤 BOSS 活跃时间
     if (
         bossActiveType !== '无限制' &&
@@ -45,7 +44,7 @@ async function checkJobDetail(
 
     let detailPageUrl = getDetailUrl({ encryptJobId, lid, securityId });
     // 工作内容 不可包含屏蔽词
-    let foundExcludeSkill = excludeJobs.find(word => jobDetail.includes(word));
+    let foundExcludeSkill = getMatchExcludeWord(jobDetail, excludeJobs);
     if (foundExcludeSkill) {
         return `🎃 略过 ${fullName}，工作内容包含屏蔽词：${foundExcludeSkill}。\n🛜 复查链接：${detailPageUrl}`;
     }
@@ -85,4 +84,28 @@ function getDetailUrl({ encryptJobId, lid, securityId }) {
     return `https://www.zhipin.com/job_detail/${encryptJobId}.html?lid=${lid}&securityId=${securityId}&sessionId=`;
 }
 
-export { sleep, getDataFormJobUrl, parseCookies, checkJobDetail };
+/**
+ * 工作名、工作详情，可能包含：
+ * 1. 非外包
+ * 2. 不考虑外包
+ */
+function getMatchExcludeWord(content = '', excludeWords = []) {
+    let wordsMayOpposite = ['外包', '派遣', '驻场', '外派'];
+    let wordsMayOppositeRegs = wordsMayOpposite.map(word => new RegExp(`(?<=非.{0,5})${word}`));
+
+    return excludeWords.find(name => {
+        // content 不包含 可能反义词，直接匹配
+        if (!wordsMayOpposite.find(word => content.includes(word))) {
+            return content.includes(name);
+        }
+
+        // content 包含可能反义词 且 反义词匹配成功
+        if (wordsMayOppositeRegs.find(reg => reg.test(content))) {
+            return false;
+        }
+
+        return true;
+    });
+}
+
+export { sleep, getDataFormJobUrl, parseCookies, checkJobDetail, getMatchExcludeWord };

@@ -57,12 +57,11 @@ async function addBossToFriendList(data = { securityId: '', encryptJobId: '', li
  * @param {String} helloTxt
  */
 async function customGreeting({ helloTxt, vueState, securityId }) {
-    const userInfo = vueState?.userInfo;
-    const uid = userInfo?.userId; // todo 从页面上的 dom 获取
+    const { userId: uid, encryptUserId } = vueState?.userInfo || {};
     if (!uid) throw new Error('没有获取到 uid');
 
     const bossData = await getBossData({
-        encryptUserId: userInfo.encryptUserId,
+        encryptUserId,
         securityId,
     }); // 获取打招呼信息
 
@@ -72,8 +71,6 @@ async function customGreeting({ helloTxt, vueState, securityId }) {
         to_name: bossData.data.encryptBossId, // encryptUserId
         content: helloTxt,
     });
-
-    console.log(333, buf.send);
 
     buf.send();
 }
