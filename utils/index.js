@@ -5,7 +5,7 @@
  */
 function handleSalary(str) {
     let reg = /\d+/g;
-    let [minNum, maxNum] = str.match(reg).map(str => +str);
+    let [minNum, maxNum] = str.match(reg).map((str) => +str);
 
     // 适配“元”
     if (!str.includes('K')) {
@@ -40,7 +40,7 @@ function handleQueryStr(url) {
     let [, queryStr = ''] = url.split('?');
     // a=11&b=222
     let queryObj = {};
-    queryStr.split('&').map(currStr => {
+    queryStr.split('&').map((currStr) => {
         let [key, val] = currStr.split('=');
 
         switch (key) {
@@ -58,8 +58,35 @@ function handleQueryStr(url) {
     return queryObj;
 }
 
+/**
+ * 工作名、工作详情，可能包含：
+ * 1. 非外包
+ * 2. 不考虑外包
+ */
+function getMatchExcludeWord(content = '', excludeWords = []) {
+    let wordsMayOpposite = ['外包', '派遣', '驻场', '外派'];
+    let wordsMayOppositeRegs = wordsMayOpposite.map(
+        (word) => new RegExp(`(?<=非.{0,5})${word}`)
+    );
+
+    return excludeWords.find((name) => {
+        // content 不包含 可能反义词，直接匹配
+        if (!wordsMayOpposite.find((word) => content.includes(word))) {
+            return content.includes(name);
+        }
+
+        // content 包含可能反义词 且 反义词匹配成功
+        if (wordsMayOppositeRegs.find((reg) => reg.test(content))) {
+            return false;
+        }
+
+        return true;
+    });
+}
+
 module.exports = {
     handleSalary,
     sleep,
     getDataFormJobUrl,
+    getMatchExcludeWord,
 };
