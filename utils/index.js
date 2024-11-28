@@ -69,19 +69,21 @@ function getMatchExcludeWord(content = '', excludeWords = []) {
         (word) => new RegExp(`(?<=非.{0,5})${word}`)
     );
 
-    return excludeWords.find((name) => {
-        // content 不包含 可能反义词，直接匹配
+    for (let i = 0; i < excludeWords.length; i++) {
+        const name = excludeWords[i];
+
+        // 不包含 可能反义词，直接匹配
         if (!wordsMayOpposite.find((word) => content.includes(word))) {
-            return content.includes(name);
+            return content.includes(name); // false
         }
 
-        // content 包含可能反义词 且 反义词匹配成功
+        // 包含 可能反义词 且 反义词匹配成功
         if (wordsMayOppositeRegs.find((reg) => reg.test(content))) {
             return false;
         }
 
         return true;
-    });
+    }
 }
 
 module.exports = {
