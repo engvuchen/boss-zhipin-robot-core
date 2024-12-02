@@ -68,17 +68,17 @@ function getMatchExcludeWord(content = '', excludeWords = []) {
     let wordsMayOppositeRegs = wordsMayOpposite.map(
         (word) => new RegExp(`(?<=非.{0,5})${word}`)
     );
-
+    let newContent = content.toLowerCase();
     for (let i = 0; i < excludeWords.length; i++) {
         const name = excludeWords[i];
 
         // 不包含 可能反义词，直接匹配
-        if (!wordsMayOpposite.find((word) => content.includes(word))) {
-            return content.includes(name); // false
+        if (!wordsMayOpposite.find((word) => newContent.includes(word))) {
+            return newContent.includes(name); // false
         }
 
         // 包含 可能反义词 且 反义词匹配成功
-        if (wordsMayOppositeRegs.find((reg) => reg.test(content))) {
+        if (wordsMayOppositeRegs.find((reg) => reg.test(newContent))) {
             return false;
         }
 
