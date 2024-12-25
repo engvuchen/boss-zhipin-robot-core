@@ -159,7 +159,7 @@ async function autoSayHello(marketPage, vueState) {
         // 筛选岗位名
         let excludeJobName = getMatchExcludeWord(jobName, excludeJobs);
         if (excludeJobName) {
-            myLog(`🎃 略过${fullName}，包含屏蔽工作关键词（${excludeJobName}）`);
+            myLog(`🎃 略过${fullName}，工作名包含屏蔽关键词（${excludeJobName}）`);
             return false;
         }
         // 筛选薪资 取区间有交集的。BOSS 会返回有交集的区间，例如 12-14K，会返回 13-20K

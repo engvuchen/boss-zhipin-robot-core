@@ -100,31 +100,32 @@ function getDetailUrl({ encryptJobId, lid, securityId }) {
 }
 
 /**
+ * 若内容包含排除词，返回它；否则返回 false。若是反义词检测返回 false
+ *
  * 工作名、工作详情，可能包含：
  * 1. 非外包
  * 2. 不考虑外包
  */
 function getMatchExcludeWord(content = '', excludeWords = []) {
-    let wordsMayOpposite = ['外包', '派遣', '驻场', '外派'];
-    let wordsMayOppositeRegs = wordsMayOpposite.map(
+    let wordsMayOppositeRegs = ['外包', '派遣', '驻场', '外派'].map(
         (word) => new RegExp(`(?<=非.{0,5})${word}`)
     );
 
-    let newContent = content.toLowerCase();
+    let lowerCaseContent = content.toLowerCase();
     for (let i = 0; i < excludeWords.length; i++) {
         const name = excludeWords[i];
 
-        // 不包含 可能反义词，直接匹配
-        if (!wordsMayOpposite.find((word) => newContent.includes(word))) {
-            return newContent.includes(name); // false
-        }
+        // 若反义词匹配，返回
+        if (wordsMayOppositeRegs.find((reg) => reg.test(lowerCaseContent))) {
+            console.log('反义词匹配正常', name);
 
-        // 包含 可能反义词 且 反义词匹配成功
-        if (wordsMayOppositeRegs.find((reg) => reg.test(newContent))) {
             return false;
+        } else {
+            // 反义词不匹配。判断排除词是否包括
+            if (lowerCaseContent.includes(name)) {
+                return name;
+            }
         }
-
-        return true;
     }
 }
 
