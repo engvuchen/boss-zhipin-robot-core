@@ -36,6 +36,8 @@ async function checkJobDetail(
 
     let { activeTimeDesc, postDescription: jobDetail } =
         res.data.zpData.jobCard;
+
+    jobDetail = jobDetail.toLowerCase();
     // 过滤 BOSS 活跃时间
     if (
         bossActiveType !== '无限制' &&
@@ -54,7 +56,9 @@ async function checkJobDetail(
         return `🎃 略过${fullName}，工作内容包含屏蔽词：${foundExcludeSkill}。\n🛜 复查链接：${detailPageUrl}`;
     }
     // 工作内容 - 需包含关键技能
-    let notFoundSkill = keySkills.find((skill) => !jobDetail.includes(skill));
+    let notFoundSkill = keySkills.find(
+        (skill) => !jobDetail.toLowerCase().includes(skill.toLowerCase())
+    );
     if (keySkills.length && notFoundSkill) {
         return `🎃 略过${fullName}，工作内容不包含关键技能：${notFoundSkill}。\n🛜 复查链接：${detailPageUrl}`;
     }
