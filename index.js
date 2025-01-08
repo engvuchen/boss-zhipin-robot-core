@@ -38,6 +38,7 @@ let keySkills = [];
 let bossActiveType = '无限制';
 let excludeCompanies = [];
 let excludeJobs = [];
+let excludeJobNames = [];
 
 let headless = 'new';
 
@@ -54,6 +55,7 @@ async function start(conf = {}) {
         bossActiveType = '无限制',
         excludeCompanies = [],
         excludeJobs = [],
+        excludeJobNames = [],
         headless = 'new',
     } = conf);
 
@@ -61,8 +63,10 @@ async function start(conf = {}) {
     pageNum = queryParams.page || 1;
     ignoreNum = 0;
 
-    [keySkills, excludeCompanies, excludeJobs] = [keySkills, excludeCompanies, excludeJobs].map(list =>
-        list.map(item => item.toLowerCase())
+    [keySkills, excludeCompanies, excludeJobs, excludeJobNames].forEach(
+        (list, index) => {
+            list[index] = list[index].toLowerCase();
+        }
     );
 
     resetOnetimeStatus();
@@ -85,21 +89,29 @@ async function start(conf = {}) {
 
         let resList = await Promise.allSettled([
             // 检测 Boss 安全检测
-            marketPage.waitForSelector('#wrap > div > div.error-content > div > button[ka="validate_button_click"]'),
+            marketPage.waitForSelector(
+                '#wrap > div > div.error-content > div > button[ka="validate_button_click"]'
+            ),
             // 检测 抵达沟通上限
             marketPage.waitForSelector('div.dialog-title > .title'),
         ]);
-        let [isGotAught, isReachLimit] = resList.filter(curr => curr.status === 'fulfilled');
+        let [isGotAught, isReachLimit] = resList.filter(
+            (curr) => curr.status === 'fulfilled'
+        );
 
         if (isGotAught || isReachLimit) {
-            if (isGotAught) myLog('❌ 执行出错：检测到 Boss 安全校验。请先在 Boss 网页上完成验证后重试');
-            if (isReachLimit) myLog('❌ 执行出错：抵达 Boss 每日沟通上限（100）');
+            if (isGotAught)
+                myLog(
+                    '❌ 执行出错：检测到 Boss 安全校验。请先在 Boss 网页上完成验证后重试'
+                );
+            if (isReachLimit)
+                myLog('❌ 执行出错：抵达 Boss 每日沟通上限（100）');
         } else {
             myLog('❌ 执行出错', error);
         }
     }
 
-    await browser?.close()?.catch(e => myLog('关闭无头浏览器出错', e));
+    await browser?.close()?.catch((e) => myLog('关闭无头浏览器出错', e));
     browser = null;
     marketPage = null;
 }
@@ -121,13 +133,18 @@ async function main(vueState) {
     // 获取翻页按钮
     let nextPageBtn = await marketPage.waitForSelector('.ui-icon-arrow-right');
     // 若右翻页按钮是禁用，说明不可翻页，岗位已全部遍历
-    if ((await marketPage.evaluate(node => node?.parentElement?.className, nextPageBtn)) === 'disabled') {
+    if (
+        (await marketPage.evaluate(
+            (node) => node?.parentElement?.className,
+            nextPageBtn
+        )) === 'disabled'
+    ) {
         throw new Error(`已遍历所有岗位，但目标未完成`);
     }
 
     await sleep(10000); // 翻页等 10s
 
-    await marketPage.evaluate(node => node.click(), nextPageBtn);
+    await marketPage.evaluate((node) => node.click(), nextPageBtn);
     ++pageNum;
 
     await main(vueState);
@@ -135,12 +152,13 @@ async function main(vueState) {
 // 遍历此页的工作岗位，过滤不匹配岗位、给筛选出的BOSS打招呼
 async function autoSayHello(marketPage, vueState) {
     const jobList = await marketPage.evaluate(() => {
-        let jobList = document.querySelector('#wrap .page-job-wrapper')?.__vue__?.jobList;
+        let jobList = document.querySelector('#wrap .page-job-wrapper')?.__vue__
+            ?.jobList;
         return JSON.parse(JSON.stringify(jobList));
     });
     if (!jobList?.length) throw new Error('岗位列表为空');
 
-    let validJobs = jobList.filter(job => {
+    let validJobs = jobList.filter((job) => {
         let { contact, brandName, jobName, salaryDesc } = job;
         let fullName = `《${brandName}》 ${jobName}`;
 
@@ -150,16 +168,22 @@ async function autoSayHello(marketPage, vueState) {
             return false;
         }
         // 筛选公司名
-        let excludeCompanyName = excludeCompanies.find(name => brandName.includes(name));
+        let excludeCompanyName = excludeCompanies.find((name) =>
+            brandName.includes(name)
+        );
         if (excludeCompanyName) {
-            myLog(`🎃 略过${fullName}，包含屏蔽公司关键词（${excludeCompanyName}）`);
+            myLog(
+                `🎃 略过${fullName}，包含屏蔽公司关键词（${excludeCompanyName}）`
+            );
             return false;
         }
 
         // 筛选岗位名
-        let excludeJobName = getMatchExcludeWord(jobName, excludeJobs);
+        let excludeJobName = getMatchExcludeWord(jobName, excludeJobNames);
         if (excludeJobName) {
-            myLog(`🎃 略过${fullName}，工作名包含屏蔽关键词（${excludeJobName}）`);
+            myLog(
+                `🎃 略过${fullName}，工作名包含屏蔽关键词（${excludeJobName}）`
+            );
             return false;
         }
         // 筛选薪资 取区间有交集的。BOSS 会返回有交集的区间，例如 12-14K，会返回 13-20K
@@ -168,7 +192,8 @@ async function autoSayHello(marketPage, vueState) {
         let availSalary =
             customSalaryMax === Infinity
                 ? true // [0, Infinity]，所有工作薪资都比 0 高
-                : customSalaryMax >= oriSalaryMin && customSalaryMin <= oriSalaryMax;
+                : customSalaryMax >= oriSalaryMin &&
+                  customSalaryMin <= oriSalaryMax;
         if (!availSalary) {
             myLog(
                 `🎃 略过${fullName}，当前 [${oriSalaryMin}, ${oriSalaryMax}], 不满足 [${customSalaryMin}, ${customSalaryMax}]`
@@ -202,10 +227,19 @@ async function autoSayHello(marketPage, vueState) {
  * 发送自定义招呼语
  */
 async function newSendHello(job, marketPage, { vueState }) {
-    let { _fullName: fullName, _desc: desc, securityId, lid, encryptJobId } = job;
+    let {
+        _fullName: fullName,
+        _desc: desc,
+        securityId,
+        lid,
+        encryptJobId,
+    } = job;
 
     // 浏览器挂载 vueState，打招呼相关的 api
-    let scriptStr = await fsp.readFile(path.resolve(__dirname, './window-build/index.js'), 'utf-8');
+    let scriptStr = await fsp.readFile(
+        path.resolve(__dirname, './window-build/index.js'),
+        'utf-8'
+    );
     await marketPage.evaluate(
         async ({ vueState, scriptStr }) => {
             if (!window.vueState) window.vueState = vueState;
@@ -219,10 +253,25 @@ async function newSendHello(job, marketPage, { vueState }) {
 
     // 校验 工作内容、boss 活跃时间 - 岗位详情接口
     let errmsg = await marketPage.evaluate(
-        async ({ securityId, lid, encryptJobId, excludeJobs, bossActiveType, fullName, keySkills }) => {
+        async ({
+            securityId,
+            lid,
+            encryptJobId,
+            excludeJobs,
+            excludeJobNames,
+            bossActiveType,
+            fullName,
+            keySkills,
+        }) => {
             return await window.checkJobDetail(
                 { securityId, lid, encryptJobId },
-                { excludeJobs, bossActiveType, fullName, keySkills }
+                {
+                    excludeJobs,
+                    excludeJobNames,
+                    bossActiveType,
+                    fullName,
+                    keySkills,
+                }
             );
         },
         {
@@ -230,6 +279,7 @@ async function newSendHello(job, marketPage, { vueState }) {
             lid,
             encryptJobId,
             excludeJobs,
+            excludeJobNames,
             bossActiveType,
             fullName,
             keySkills,
@@ -250,7 +300,11 @@ async function newSendHello(job, marketPage, { vueState }) {
 
             await window.sleep(3000); // 模拟点击岗位详情，然后跳转BOSS列表沟通
 
-            await window.customGreeting({ helloTxt, vueState: window.vueState, securityId });
+            await window.customGreeting({
+                helloTxt,
+                vueState: window.vueState,
+                securityId,
+            });
         },
         {
             helloTxt,
@@ -284,19 +338,27 @@ async function init() {
             waitUntil: 'networkidle2',
         });
         // 登录态是否有效
-        const headerLoginBtn = await marketPage.waitForSelector('.header-login-btn').catch(e => {
-            if (e) return false;
-        });
+        const headerLoginBtn = await marketPage
+            .waitForSelector('.header-login-btn')
+            .catch((e) => {
+                if (e) return false;
+            });
         if (headerLoginBtn) throw new Error('登录态过期，请重新获取 cookie');
         // 关闭安全问题弹窗
-        await marketPage.click('.dialog-account-safe > div.dialog-container > div.dialog-title > a').catch(e => e);
+        await marketPage
+            .click(
+                '.dialog-account-safe > div.dialog-container > div.dialog-title > a'
+            )
+            .catch((e) => e);
     }
 }
 /** 启动浏览器，写入 cookie */
 async function initBrowserAndSetCookie() {
     const BROWERLESS = process.env.BROWERLESS;
     if (BROWERLESS) {
-        myLog(`使用远程浏览器启动服务，“观察打招呼过程”无效，超时时间建议 16s 以上`);
+        myLog(
+            `使用远程浏览器启动服务，“观察打招呼过程”无效，超时时间建议 16s 以上`
+        );
 
         browser = await puppeteer.connect({
             browserWSEndpoint: BROWERLESS,
@@ -319,7 +381,7 @@ async function getNewPage() {
 }
 function getMarketUrl() {
     return `https://www.zhipin.com/web/geek/job?${Object.keys(queryParams)
-        .map(key => `${key}=${encodeURIComponent(queryParams[key])}`)
+        .map((key) => `${key}=${encodeURIComponent(queryParams[key])}`)
         .join('&')}`;
 }
 
