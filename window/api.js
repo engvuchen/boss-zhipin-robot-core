@@ -11,13 +11,16 @@ function requestCard(params = { securityId: '', lid: '' }) {
 }
 
 /**
- * 添加 BOSS 到沟通列表
+ * 接口方式，添加 BOSS 到沟通列表
  * @param {Object} page puppeteerPage
  * @param {Object} data { securityId: '', encryptJobId: '', lid: '' }
  * @param {Number} retries
  * @returns
  */
-async function addBossToFriendList(data = { securityId: '', encryptJobId: '', lid: '' }, retries = 3) {
+async function addBossToFriendList(
+    data = { securityId: '', encryptJobId: '', lid: '' },
+    retries = 3
+) {
     if (retries === 0) throw new StopError('addBossToFriendList 重试多次失败');
 
     const token = parseCookies(window.document.cookies)?.bst;
@@ -34,8 +37,13 @@ async function addBossToFriendList(data = { securityId: '', encryptJobId: '', li
             },
             headers: { Zp_token: token },
         });
-        if (res.data.code === 1 && res.data?.zpData?.bizData?.chatRemindDialog?.content) {
-            throw new StopError(res.data?.zpData?.bizData?.chatRemindDialog?.content);
+        if (
+            res.data.code === 1 &&
+            res.data?.zpData?.bizData?.chatRemindDialog?.content
+        ) {
+            throw new StopError(
+                res.data?.zpData?.bizData?.chatRemindDialog?.content
+            );
         }
 
         if (res.data.code !== 0) {
@@ -80,7 +88,10 @@ async function customGreeting({ helloTxt, vueState, securityId }) {
  * @param {Number} retries
  * @returns
  */
-async function getBossData(params = { encryptUserId: '', securityId: '' }, retries = 3) {
+async function getBossData(
+    params = { encryptUserId: '', securityId: '' },
+    retries = 3
+) {
     if (retries === 0) throw new StopError('getBossData 重试多次失败');
 
     const token = parseCookies(window.document.cookies)?.bst;
@@ -92,6 +103,7 @@ async function getBossData(params = { encryptUserId: '', securityId: '' }, retri
         data.append('securityId', params.securityId);
         data.append('bossSrc', '0');
 
+        // bossId、securityId 都是自己的信息；实际效果应该是返回沟通列表的第一个
         const res = await axios({
             url: 'https://www.zhipin.com/wapi/zpchat/geek/getBossData',
             method: 'POST',
@@ -99,11 +111,13 @@ async function getBossData(params = { encryptUserId: '', securityId: '' }, retri
             headers: { Zp_token: token },
         });
         if (res.data.code !== 0) {
+            // 发生错误，且是“非好友关系”，说明上一步“添加BOSS到好友”失败了，此时需要终止
             if (res.data.message !== '非好友关系') {
                 throw new StopError('状态错误：' + res.data.message);
             }
 
-            return getBossData(params, '非好友关系', retries - 1);
+            // 发生错误
+            return getBossData(params, retries - 1);
         }
 
         return res.data.zpData;

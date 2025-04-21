@@ -75,14 +75,14 @@ class Message {
         };
 
         this.msg = AwesomeMessage.encode(data).finish().slice();
-        this.hex = [...this.msg].map(b => b.toString(16).padStart(2, '0')).join('');
+        this.hex = [...this.msg]
+            .map((b) => b.toString(16).padStart(2, '0'))
+            .join('');
     }
     toArrayBuffer() {
         return this.msg.buffer.slice(0, this.msg.byteLength);
     }
     send() {
-        console.log(999, window.ChatWebsocket?.send);
-
         window.ChatWebsocket.send(this);
     }
 }

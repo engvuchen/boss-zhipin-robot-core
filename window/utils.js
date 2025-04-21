@@ -24,20 +24,22 @@ function parseCookies() {
  */
 async function checkJobDetail(
     { lid, securityId, encryptJobId } = {},
-    { excludeJobs, bossActiveType, fullName, keySkills } = {}
+    { bossActiveType, excludeJobs, keySkills, fullName } = {}
 ) {
-    const res = await requestCard({
+    const res = await window.requestCard({
         lid,
         securityId,
         encryptJobId,
     });
-    if (res.data.code !== 0)
+    if (res.data.code !== 0) {
         throw new Error('requestCard 响应错误:' + res.data.message);
+    }
 
     let { activeTimeDesc, postDescription: jobDetail } =
         res.data.zpData.jobCard;
 
     jobDetail = jobDetail.toLowerCase();
+
     // 过滤 BOSS 活跃时间
     if (
         bossActiveType !== '无限制' &&
@@ -121,8 +123,6 @@ function getMatchExcludeWord(content = '', excludeWords = []) {
 
         // 若反义词匹配，返回
         if (wordsMayOppositeRegs.find((reg) => reg.test(lowerCaseContent))) {
-            console.log('反义词匹配正常', name);
-
             return false;
         } else {
             // 反义词不匹配。判断排除词是否包括

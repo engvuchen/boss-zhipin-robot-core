@@ -5,6 +5,7 @@ const { sleep, handleSalary, getMatchExcludeWord } = require('./utils');
 
 let browser;
 let marketPage;
+let friendPage;
 let logs = [];
 let ignoreNum = 0;
 let pageNum = 1;
@@ -63,11 +64,10 @@ async function start(conf = {}) {
     pageNum = queryParams.page || 1;
     ignoreNum = 0;
 
-    [keySkills, excludeCompanies, excludeJobs, excludeJobNames].forEach(
-        (list, index) => {
-            list[index] = list[index].toLowerCase();
-        }
-    );
+    let list = [keySkills, excludeCompanies, excludeJobs, excludeJobNames];
+    list = list.map((arr, index) => {
+        return arr.map((curr) => curr.toLowerCase());
+    });
 
     resetOnetimeStatus();
 
@@ -75,12 +75,22 @@ async function start(conf = {}) {
         myLog(`⏳ 自动打招呼进行中, 本次目标: ${targetNum}; 请耐心等待`);
 
         await init();
+        // 岗位页：从指定元素获取 vueState
         let vueState = await marketPage.evaluate(() => {
             let state = document.querySelector('#wrap')?.__vue__?.$store?.state; // 用户信息
             if (!state) throw new Error('未找到 vue 数据');
-            return JSON.parse(JSON.stringify(state));
+
+            let newState = JSON.parse(JSON.stringify(state));
+            if (!window.vueState) window.vueState = newState;
+
+            return newState;
         });
-        await main(vueState);
+        await injectStateToPage(
+            friendPage,
+            JSON.parse(JSON.stringify(vueState))
+        );
+
+        await main();
 
         myLog('✨ 任务顺利完成！');
     } catch (error) {
@@ -118,7 +128,7 @@ async function start(conf = {}) {
 /**
  *
  */
-async function main(vueState) {
+async function main() {
     myLog(
         `页码：${pageNum}；剩余目标：${targetNum}；自定义薪资范围：${
             salaryRange[1] === Infinity ? '不限。' : ''
@@ -126,7 +136,7 @@ async function main(vueState) {
     );
 
     // 执行 -> 检测 -> 翻页
-    await autoSayHello(marketPage, vueState);
+    await autoSayHello(marketPage);
 
     if (targetNum <= 0) return; // 打招呼目标完成，退出
 
@@ -147,10 +157,10 @@ async function main(vueState) {
     await marketPage.evaluate((node) => node.click(), nextPageBtn);
     ++pageNum;
 
-    await main(vueState);
+    await main();
 }
 // 遍历此页的工作岗位，过滤不匹配岗位、给筛选出的BOSS打招呼
-async function autoSayHello(marketPage, vueState) {
+async function autoSayHello(marketPage) {
     const jobList = await marketPage.evaluate(() => {
         let jobList = document.querySelector('#wrap .page-job-wrapper')?.__vue__
             ?.jobList;
@@ -158,6 +168,7 @@ async function autoSayHello(marketPage, vueState) {
     });
     if (!jobList?.length) throw new Error('岗位列表为空');
 
+    // 在岗位页，就可以做的筛选：未沟通、公司名、岗位名、薪资
     let validJobs = jobList.filter((job) => {
         let { contact, brandName, jobName, salaryDesc } = job;
         let fullName = `《${brandName}》 ${jobName}`;
@@ -177,7 +188,6 @@ async function autoSayHello(marketPage, vueState) {
             );
             return false;
         }
-
         // 筛选岗位名
         let excludeJobName = getMatchExcludeWord(jobName, excludeJobNames);
         if (excludeJobName) {
@@ -207,15 +217,18 @@ async function autoSayHello(marketPage, vueState) {
         return true;
     });
 
+    await injectScriptToPage(marketPage);
+    await injectScriptToPage(friendPage);
+
     while (validJobs.length && targetNum > 0) {
         let job = validJobs.shift();
 
         if (job._fullName === undefined || job._desc === undefined) {
-            myLog('111 fullName 或 desc undefined', JSON.stringify(job)); // 异常需处理
+            myLog('fullName 或 desc undefined', JSON.stringify(job)); // 很奇怪的错误，存在字段，但读取不到；异常需处理
             return;
         }
 
-        await newSendHello(job, marketPage, { vueState });
+        await newSendHello(job, marketPage);
     }
 }
 
@@ -226,7 +239,7 @@ async function autoSayHello(marketPage, vueState) {
  * 添加 BOSS 到沟通列表；
  * 发送自定义招呼语
  */
-async function newSendHello(job, marketPage, { vueState }) {
+async function newSendHello(job, marketPage) {
     let {
         _fullName: fullName,
         _desc: desc,
@@ -235,23 +248,7 @@ async function newSendHello(job, marketPage, { vueState }) {
         encryptJobId,
     } = job;
 
-    // 浏览器挂载 vueState，打招呼相关的 api
-    let scriptStr = await fsp.readFile(
-        path.resolve(__dirname, './window-build/index.js'),
-        'utf-8'
-    );
-    await marketPage.evaluate(
-        async ({ vueState, scriptStr }) => {
-            if (!window.vueState) window.vueState = vueState;
-            eval(scriptStr);
-        },
-        {
-            vueState,
-            scriptStr,
-        }
-    );
-
-    // 校验 工作内容、boss 活跃时间 - 岗位详情接口
+    // 通过岗位详情接口，校验 工作内容、boss 活跃时间
     let errmsg = await marketPage.evaluate(
         async ({
             securityId,
@@ -278,6 +275,7 @@ async function newSendHello(job, marketPage, { vueState }) {
             securityId,
             lid,
             encryptJobId,
+            // ---
             excludeJobs,
             excludeJobNames,
             bossActiveType,
@@ -289,9 +287,12 @@ async function newSendHello(job, marketPage, { vueState }) {
 
     await sleep(1000);
 
+    // todo 岗位页的 ChatWebsocket 没了，需要手动跳转到 朋友页
     // 添加 BOSS 到沟通列表；发送自定义招呼语
-    await marketPage.evaluate(
+    // ChatWebsocket 实测在消息页存在，岗位页不存在了
+    await friendPage.evaluate(
         async ({ helloTxt, securityId, lid, encryptJobId }) => {
+            // 接口方式，添加 BOSS 到沟通列表
             await window.addBossToFriendList({
                 securityId,
                 lid,
@@ -300,6 +301,7 @@ async function newSendHello(job, marketPage, { vueState }) {
 
             await window.sleep(3000); // 模拟点击岗位详情，然后跳转BOSS列表沟通
 
+            // 打招呼
             await window.customGreeting({
                 helloTxt,
                 vueState: window.vueState,
@@ -333,7 +335,7 @@ async function init() {
     if (!onetimeStatus.init) {
         onetimeStatus.init = true;
 
-        // 打开岗位页
+        // # 打开岗位页
         await marketPage.goto(getMarketUrl(), {
             waitUntil: 'networkidle2',
         });
@@ -350,6 +352,15 @@ async function init() {
                 '.dialog-account-safe > div.dialog-container > div.dialog-title > a'
             )
             .catch((e) => e);
+
+        // getBossData 方法用自己的信息获取朋友列表的第一个（数据）
+        // 这里打开的朋友页，不刷新页面的话，数据是新的，页面是旧的
+        await friendPage.goto(
+            'https://www.zhipin.com/web/geek/chat?ka=header-message',
+            {
+                waitUntil: 'networkidle2',
+            }
+        );
     }
 }
 /** 启动浏览器，写入 cookie */
@@ -372,17 +383,44 @@ async function initBrowserAndSetCookie() {
     }
 
     marketPage = await getNewPage();
-    await marketPage.setDefaultTimeout(timeout);
-    await marketPage.setCookie(...cookies);
+    friendPage = await getNewPage();
 }
+/** 初始化一个浏览器页面配置，返回此页面对象 */
 async function getNewPage() {
     const page = await browser.newPage();
+    await page.setDefaultTimeout(timeout);
+    await page.setCookie(...cookies);
     return page;
 }
 function getMarketUrl() {
     return `https://www.zhipin.com/web/geek/job?${Object.keys(queryParams)
         .map((key) => `${key}=${encodeURIComponent(queryParams[key])}`)
         .join('&')}`;
+}
+async function injectScriptToPage(targetPage) {
+    // 注入脚本到 window
+    let scriptStr = await fsp.readFile(
+        path.resolve(__dirname, './window-build/index.js'),
+        'utf-8'
+    );
+    await targetPage.evaluate(
+        async ({ scriptStr }) => {
+            eval(scriptStr);
+        },
+        {
+            scriptStr,
+        }
+    );
+}
+async function injectStateToPage(targetPage, state = {}) {
+    await targetPage.evaluate(
+        ({ state }) => {
+            if (!window.vueState) window.vueState = state;
+        },
+        {
+            state,
+        }
+    );
 }
 
 function myLog(...args) {
