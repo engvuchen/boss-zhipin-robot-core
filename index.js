@@ -75,21 +75,6 @@ async function start(conf = {}) {
         myLog(`⏳ 自动打招呼进行中, 本次目标: ${targetNum}; 请耐心等待`);
 
         await init();
-        // 岗位页：从指定元素获取 vueState
-        let vueState = await marketPage.evaluate(() => {
-            let state = document.querySelector('#wrap')?.__vue__?.$store?.state; // 用户信息
-            if (!state) throw new Error('未找到 vue 数据');
-
-            let newState = JSON.parse(JSON.stringify(state));
-            if (!window.vueState) window.vueState = newState;
-
-            return newState;
-        });
-        await injectStateToPage(
-            friendPage,
-            JSON.parse(JSON.stringify(vueState))
-        );
-
         await main();
 
         myLog('✨ 任务顺利完成！');
@@ -125,9 +110,7 @@ async function start(conf = {}) {
     browser = null;
     marketPage = null;
 }
-/**
- *
- */
+
 async function main() {
     myLog(
         `页码：${pageNum}；剩余目标：${targetNum}；自定义薪资范围：${
@@ -135,37 +118,32 @@ async function main() {
         }[${salaryRange.join(', ')}]`
     );
 
-    // 执行 -> 检测 -> 翻页
     await autoSayHello(marketPage);
-
     if (targetNum <= 0) return; // 打招呼目标完成，退出
 
-    // 获取翻页按钮
-    let nextPageBtn = await marketPage.waitForSelector('.ui-icon-arrow-right');
-    // 若右翻页按钮是禁用，说明不可翻页，岗位已全部遍历
-    if (
-        (await marketPage.evaluate(
-            (node) => node?.parentElement?.className,
-            nextPageBtn
-        )) === 'disabled'
-    ) {
-        throw new Error(`已遍历所有岗位，但目标未完成`);
-    }
-
-    await sleep(10000); // 翻页等 10s
-
-    await marketPage.evaluate((node) => node.click(), nextPageBtn);
     ++pageNum;
+
+    // 手动触发请求
+    await marketPage.evaluate(async (pageNum) => {
+        document
+            .querySelector('.page-jobs-main')
+            .__vue__.onSearch(pageNum, { loadMore: true });
+    }, pageNum);
+    await sleep(1000);
+
+    if (pageNum >= 20) return; // joblist.json 接口有 hasNext=false，但还能请求且数据不重复；30、40、100 的页码都成功的
 
     await main();
 }
-// 遍历此页的工作岗位，过滤不匹配岗位、给筛选出的BOSS打招呼
+/** 遍历工作岗位，去掉不匹配岗位、给筛选出的BOSS打招呼 */
 async function autoSayHello(marketPage) {
-    const jobList = await marketPage.evaluate(() => {
-        let jobList = document.querySelector('#wrap .page-job-wrapper')?.__vue__
-            ?.jobList;
+    const jobList = await marketPage.evaluate((pageNum) => {
+        // 这里的数据是逐渐递增的，没有查重
+        let jobList = document
+            .querySelector('.page-jobs-main')
+            .__vue__?.jobList.slice((pageNum - 1) * 14, pageNum * 14);
         return JSON.parse(JSON.stringify(jobList));
-    });
+    }, pageNum);
     if (!jobList?.length) throw new Error('岗位列表为空');
 
     // 在岗位页，就可以做的筛选：未沟通、公司名、岗位名、薪资
@@ -224,11 +202,11 @@ async function autoSayHello(marketPage) {
         let job = validJobs.shift();
 
         if (job._fullName === undefined || job._desc === undefined) {
-            myLog('fullName 或 desc undefined', JSON.stringify(job)); // 很奇怪的错误，存在字段，但读取不到；异常需处理
+            myLog('fullName 或 desc undefined', JSON.stringify(job)); // 错误偶现，存在字段，但读取不到；异常需处理
             return;
         }
 
-        await newSendHello(job, marketPage);
+        await sendHello(job, marketPage);
     }
 }
 
@@ -239,7 +217,7 @@ async function autoSayHello(marketPage) {
  * 添加 BOSS 到沟通列表；
  * 发送自定义招呼语
  */
-async function newSendHello(job, marketPage) {
+async function sendHello(job, marketPage) {
     let {
         _fullName: fullName,
         _desc: desc,
@@ -287,9 +265,8 @@ async function newSendHello(job, marketPage) {
 
     await sleep(1000);
 
-    // todo 岗位页的 ChatWebsocket 没了，需要手动跳转到 朋友页
     // 添加 BOSS 到沟通列表；发送自定义招呼语
-    // ChatWebsocket 实测在消息页存在，岗位页不存在了
+    // 岗位页的 ChatWebsocket 没了，需在朋友页发起请求
     await friendPage.evaluate(
         async ({ helloTxt, securityId, lid, encryptJobId }) => {
             // 接口方式，添加 BOSS 到沟通列表
@@ -301,10 +278,13 @@ async function newSendHello(job, marketPage) {
 
             await window.sleep(3000); // 模拟点击岗位详情，然后跳转BOSS列表沟通
 
+            let state = document.querySelector('#wrap')?.__vue__?.$store?.state; // 用户信息 friendPage 也有
+            if (!state) throw new Error('未找到 vue 数据');
+
             // 打招呼
             await window.customGreeting({
                 helloTxt,
-                vueState: window.vueState,
+                vueState: JSON.parse(JSON.stringify(state)),
                 securityId,
             });
         },
