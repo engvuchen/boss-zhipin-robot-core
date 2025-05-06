@@ -8,11 +8,12 @@ let marketPage;
 let friendPage;
 let logs = [];
 let ignoreNum = 0;
-let pageNum = 1;
+let pageNum;
 
 let onetimeStatus = {
     init: false,
 };
+const MAX_PAGE_NUM = 45; // 列表接口，虽然 next_page=false，但更换页码后还能请求；最近一次失败是 45 页
 
 let queryParams = {}; // { page, query, experience, salary }, 只用到 page
 let helloTxt = '';
@@ -77,7 +78,7 @@ async function start(conf = {}) {
         await init();
         await main();
 
-        myLog('✨ 任务顺利完成！');
+        myLog(`✨ 任务顺利完成！目标剩余：${targetNum}`);
     } catch (error) {
         myLog('当前页码', pageNum);
         myLog('📊 未投递岗位数：', targetNum, '；略过岗位数：', ignoreNum);
@@ -131,7 +132,7 @@ async function main() {
     }, pageNum);
     await sleep(1000);
 
-    if (pageNum >= 20) return; // joblist.json 接口有 hasNext=false，但还能请求且数据不重复；30、40、100 的页码都成功的
+    if (pageNum >= MAX_PAGE_NUM) return; // joblist.json 接口有 hasNext=false，但还能请求且数据不重复；30、40、100 的页码都成功的
 
     await main();
 }
