@@ -13,7 +13,7 @@ let pageNum;
 let onetimeStatus = {
     init: false,
 };
-const MAX_PAGE_NUM = 45; // 列表接口，虽然 next_page=false，但更换页码后还能请求；最近一次失败是 45 页
+const MAX_PAGE_NUM = 21; // 列表接口，虽然 next_page=false，但更换页码后还能请求；最近一次失败是 45 页；深圳地区3-5、5-10，从21页开始重复
 
 let queryParams = {}; // { page, query, experience, salary }, 只用到 page
 let helloTxt = '';
