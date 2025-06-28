@@ -76,6 +76,9 @@ async function start(conf = {}) {
         myLog(`⏳ 自动打招呼进行中, 本次目标: ${targetNum}; 请耐心等待`);
 
         await init();
+        await injectScriptToPage(marketPage);
+        await injectScriptToPage(friendPage);
+
         await main();
 
         myLog(`✨ 任务顺利完成！目标剩余：${targetNum}`);
@@ -147,7 +150,7 @@ async function autoSayHello(marketPage) {
     }, pageNum);
     if (!jobList?.length) throw new Error('岗位列表为空');
 
-    // 在岗位页，就可以做的筛选：未沟通、公司名、岗位名、薪资
+    // 岗位页支持筛选：未沟通、公司名、岗位名、薪资
     let validJobs = jobList.filter((job) => {
         let { contact, brandName, jobName, salaryDesc } = job;
         let fullName = `《${brandName}》 ${jobName}`;
@@ -195,9 +198,6 @@ async function autoSayHello(marketPage) {
 
         return true;
     });
-
-    await injectScriptToPage(marketPage);
-    await injectScriptToPage(friendPage);
 
     while (validJobs.length && targetNum > 0) {
         let job = validJobs.shift();
@@ -316,11 +316,11 @@ async function init() {
     if (!onetimeStatus.init) {
         onetimeStatus.init = true;
 
-        // # 打开岗位页
+        // 打开岗位页
         await marketPage.goto(getMarketUrl(), {
             waitUntil: 'networkidle2',
         });
-        // 登录态是否有效
+        // 检测登录态是否有效
         const headerLoginBtn = await marketPage
             .waitForSelector('.header-login-btn')
             .catch((e) => {
@@ -390,16 +390,6 @@ async function injectScriptToPage(targetPage) {
         },
         {
             scriptStr,
-        }
-    );
-}
-async function injectStateToPage(targetPage, state = {}) {
-    await targetPage.evaluate(
-        ({ state }) => {
-            if (!window.vueState) window.vueState = state;
-        },
-        {
-            state,
         }
     );
 }
