@@ -13,8 +13,9 @@ let pageNum;
 let onetimeStatus = {
     init: false,
 };
-const MAX_PAGE_NUM = 21; // 列表接口，虽然 next_page=false，但更换页码后还能请求；最近一次失败是 45 页；深圳地区3-5、5-10，从21页开始重复
+const MAX_PAGE_NUM = 21; // 列表接口，虽然 next_page=false，但更换页码后还能请求；深圳地区3-5、5-10，从21页开始重复
 
+// ----- 初始化表单参数
 let queryParams = {}; // { page, query, experience, salary }, 只用到 page
 let helloTxt = '';
 let cookies = [
@@ -34,6 +35,7 @@ let cookies = [
     },
 ];
 let targetNum;
+let originNum;
 let timeout = 3000;
 let salaryRange = [0, Infinity];
 let keySkills = [];
@@ -41,8 +43,8 @@ let bossActiveType = '无限制';
 let excludeCompanies = [];
 let excludeJobs = [];
 let excludeJobNames = [];
-
 let headless = 'new';
+// ------
 
 // 初始化参数、初始化一次性状态、全局错误处理
 async function start(conf = {}) {
@@ -60,6 +62,7 @@ async function start(conf = {}) {
         excludeJobNames = [],
         headless = 'new',
     } = conf);
+    originNum = targetNum;
 
     cookies[0].value = wt2Cookie;
     pageNum = queryParams.page || 1;
@@ -76,12 +79,14 @@ async function start(conf = {}) {
         myLog(`⏳ 自动打招呼进行中, 本次目标: ${targetNum}; 请耐心等待`);
 
         await init();
-        await injectScriptToPage(marketPage);
-        await injectScriptToPage(friendPage);
+        await Promise.all([
+            injectScriptToPage(marketPage),
+            injectScriptToPage(friendPage),
+        ]);
 
         await main();
 
-        myLog(`✨ 任务顺利完成！目标剩余：${targetNum}`);
+        myLog(`✨ 任务顺利完成！已投递${originNum}，目标剩余${targetNum}`);
     } catch (error) {
         myLog('当前页码', pageNum);
         myLog('📊 未投递岗位数：', targetNum, '；略过岗位数：', ignoreNum);
@@ -94,22 +99,21 @@ async function start(conf = {}) {
             // 检测 抵达沟通上限
             marketPage.waitForSelector('div.dialog-title > .title'),
         ]);
-        let [isGotAught, isReachLimit] = resList.filter(
+
+        let [isTriggeredSecurityCheck, isReachLimit] = resList.filter(
             (curr) => curr.status === 'fulfilled'
         );
-
-        if (isGotAught || isReachLimit) {
-            if (isGotAught)
-                myLog(
-                    '❌ 执行出错：检测到 Boss 安全校验。请先在 Boss 网页上完成验证后重试'
-                );
-            if (isReachLimit)
-                myLog('❌ 执行出错：抵达 Boss 每日沟通上限（100）');
-        } else {
+        if (isTriggeredSecurityCheck)
+            myLog(
+                '❌ 执行出错：检测到 Boss 安全校验。请先在 Boss 网页上完成验证后重试'
+            );
+        if (isReachLimit) myLog('❌ 执行出错：抵达 Boss 每日沟通上限（100）');
+        if (!isTriggeredSecurityCheck && !isReachLimit) {
             myLog('❌ 执行出错', error);
         }
     }
 
+    // todo
     await browser?.close()?.catch((e) => myLog('关闭无头浏览器出错', e));
     browser = null;
     marketPage = null;
@@ -135,11 +139,10 @@ async function main() {
     }, pageNum);
     await sleep(1000);
 
-    if (pageNum >= MAX_PAGE_NUM) return; // joblist.json 接口有 hasNext=false，但还能请求且数据不重复；30、40、100 的页码都成功的
-
+    if (pageNum >= MAX_PAGE_NUM) return;
     await main();
 }
-/** 遍历工作岗位，去掉不匹配岗位、给筛选出的BOSS打招呼 */
+/** 遍历工作岗位、去掉不匹配岗位、给筛选出的BOSS打招呼 */
 async function autoSayHello(marketPage) {
     const jobList = await marketPage.evaluate((pageNum) => {
         // 这里的数据是逐渐递增的，没有查重

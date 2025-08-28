@@ -65,9 +65,38 @@ async function checkJobDetail(
         return `🎃 略过${fullName}，工作内容不包含关键技能：${notFoundSkill}。\n🛜 复查链接：${detailPageUrl}`;
     }
 }
+// todo
 async function checkBossActiveStatus(type, txt = '') {
     if (!txt) return false;
     if (txt === '在线') return true;
+    
+    const zombieList = [
+        '2月内活跃',
+        '3月内活跃',
+        '4月内活跃',
+        '5月内活跃',
+        '近半年活跃',
+        '半年前活跃',
+    ];
+    if (zombieList.includes(txt)) return true;
+    return;
+
+    // const txtList = [
+    //     '在线',
+    //     '刚刚活跃',
+    //     '今日活跃',
+    //     '3日内活跃',
+    //     '本周活跃',
+    //     '2周内活跃',
+    //     '3周内活跃',
+    //     '本月活跃',
+    //     '2月内活跃',
+    //     '3月内活跃',
+    //     '4月内活跃',
+    //     '5月内活跃',
+    //     '近半年活跃',
+    //     '半年前活跃',
+    // ];
 
     let prefix = txt.slice(0, txt.indexOf('活跃'));
 
@@ -133,10 +162,4 @@ function getMatchExcludeWord(content = '', excludeWords = []) {
     }
 }
 
-export {
-    sleep,
-    getDataFormJobUrl,
-    parseCookies,
-    checkJobDetail,
-    getMatchExcludeWord,
-};
+export { sleep, parseCookies, checkJobDetail, getMatchExcludeWord };

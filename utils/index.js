@@ -21,43 +21,6 @@ function sleep(time = 1000) {
     });
 }
 
-function getDataFormJobUrl(url) {
-    let queryData = handleQueryStr(url);
-    queryData.encryptJobId = getEncryptJobId(url);
-    return queryData;
-}
-/** 获取 encryptJobId */
-function getEncryptJobId(url) {
-    let reg = /job_detail[/](.+)?[.]html/;
-    let [, id] = url.match(reg);
-    return id;
-}
-/**
- * 从完整的 url 中，获取查询参数对象
- * 对 page、query 有特殊处理
- */
-function handleQueryStr(url) {
-    let [, queryStr = ''] = url.split('?');
-    // a=11&b=222
-    let queryObj = {};
-    queryStr.split('&').map((currStr) => {
-        let [key, val] = currStr.split('=');
-
-        switch (key) {
-            case 'page':
-                val = Number(val);
-                break;
-            case 'query':
-                val = decodeURIComponent(val);
-                break;
-            default:
-                break;
-        }
-        queryObj[key] = val;
-    });
-    return queryObj;
-}
-
 /**
  * 若内容包含排除词，返回它；否则返回 false。若是反义词检测返回 false
  *
@@ -89,6 +52,5 @@ function getMatchExcludeWord(content = '', excludeWords = []) {
 module.exports = {
     handleSalary,
     sleep,
-    getDataFormJobUrl,
     getMatchExcludeWord,
 };
