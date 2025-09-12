@@ -70,26 +70,8 @@ async function checkBossActiveStatus(type, txt = '') {
     if (!txt) return false;
     if (txt === '在线') return true;
     
-    const zombieList = [
-        '2月内活跃',
-        '3月内活跃',
-        '4月内活跃',
-        '5月内活跃',
-        '近半年活跃',
-        '半年前活跃',
-    ];
-    if (zombieList.includes(txt)) return true;
-    return;
-
-    // const txtList = [
-    //     '在线',
-    //     '刚刚活跃',
-    //     '今日活跃',
-    //     '3日内活跃',
-    //     '本周活跃',
-    //     '2周内活跃',
-    //     '3周内活跃',
-    //     '本月活跃',
+    // 僵尸岗位-特殊排除
+    // const zombieList = [
     //     '2月内活跃',
     //     '3月内活跃',
     //     '4月内活跃',
@@ -97,6 +79,8 @@ async function checkBossActiveStatus(type, txt = '') {
     //     '近半年活跃',
     //     '半年前活跃',
     // ];
+    // if (zombieList.includes(txt)) return true;
+    // return;
 
     let prefix = txt.slice(0, txt.indexOf('活跃'));
 
