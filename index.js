@@ -1,7 +1,12 @@
 const fsp = require('fs/promises');
 const path = require('path');
 const puppeteer = require('./puppeteer');
-const { sleep, handleSalary, getMatchExcludeWord } = require('./utils');
+const {
+    sleep,
+    handleSalary,
+    getMatchExcludeWord,
+    getRecommendedBrowser,
+} = require('./utils');
 
 let browser;
 let marketPage;
@@ -86,7 +91,11 @@ async function start(conf = {}) {
 
         await main();
 
-        myLog(`✨ 任务顺利完成！已投递${originNum}，目标剩余${targetNum}`);
+        myLog(
+            `✨ 任务顺利完成！已投递${targetNum}，目标剩余${
+                originNum - targetNum
+            }`
+        );
     } catch (error) {
         myLog('当前页码', pageNum);
         myLog('📊 未投递岗位数：', targetNum, '；略过岗位数：', ignoreNum);
@@ -359,10 +368,13 @@ async function initBrowserAndSetCookie() {
             browserWSEndpoint: BROWERLESS,
         });
     } else {
+        let executablePath = getRecommendedBrowser()?.path;
+
         browser = await puppeteer.launch({
             headless, // 是否以浏览器视图调试
             devtools: false,
             defaultViewport: null, // null 则页面和窗口大小一致
+            ...(executablePath && { executablePath }),
         });
     }
 

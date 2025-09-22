@@ -53,4 +53,5 @@ module.exports = {
     handleSalary,
     sleep,
     getMatchExcludeWord,
+    getRecommendedBrowser: require('./detect-browser'),
 };

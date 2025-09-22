@@ -69,8 +69,9 @@ async function checkJobDetail(
 async function checkBossActiveStatus(type, txt = '') {
     if (!txt) return false;
     if (txt === '在线') return true;
-    
-    // 僵尸岗位-特殊排除
+
+    // 僵尸岗位特殊排除；启用、禁用出来后，还需执行 npm run build
+    // ---
     // const zombieList = [
     //     '2月内活跃',
     //     '3月内活跃',
@@ -81,6 +82,7 @@ async function checkBossActiveStatus(type, txt = '') {
     // ];
     // if (zombieList.includes(txt)) return true;
     // return;
+    // ---
 
     let prefix = txt.slice(0, txt.indexOf('活跃'));
 
