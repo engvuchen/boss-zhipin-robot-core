@@ -192,7 +192,7 @@ module.exports = {
 };
 
 // 如果直接运行此文件，执行检测
-if (require.main === module) {
-    const browsers = detectAllBrowsers();
-    console.log('检测到的浏览器:', browsers);
-}
+// if (require.main === module) {
+//     const browsers = detectAllBrowsers();
+//     console.log('检测到的浏览器:', browsers);
+// }
